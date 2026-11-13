@@ -307,13 +307,15 @@
             </intent-filter>
         </activity>
 
+
         <!-- T-android-dynamic-app-icon: launcher-icon aliases. Exactly
              ONE of these three is enabled at any time; AppIconRepository
              flips the enabled state in response to a Settings → App Icon
-             tap. All three target MainActivity, so the user-visible
-             launcher entry just swaps icon + label, no actual activity
-             change. Pre-install state: "auto" is enabled in the manifest
-             (android:enabled="true"), the other two are disabled. -->
+             tap. [destiny/v7] All three are back on MainActivity — the
+             native Compose app. They used to point at a WebView holding an
+             HTML design mock, which made tapping the icon open a picture
+             instead of the app. Pre-install state: "auto" is enabled in the
+             manifest (android:enabled="true"), the other two are disabled. -->
         <activity-alias
             android:name=".MainActivityIconAuto"
             android:targetActivity=".MainActivity"
@@ -708,7 +710,7 @@
             android:exported="false"
             android:grantUriPermissions="true" />
         <receiver
-            android:name="com.mibot.cap.phone.shell.BootRestoreHandler"
+            android:name="com.mibot.cap.phone.setup.BootRestoreHandler"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
