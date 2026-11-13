@@ -14,6 +14,8 @@ object ParallelCapability {
     const val MIN_SDK = 34
     const val DEFAULT_MAX = 2
     private const val MAX = 3
+    /** 判定 lowRam 的可用内存下限(约等于系统 lowMemory 阈值,常见 ~166MB)。 */
+    private const val LOW_RAM_AVAIL_BYTES = 166L * 1024 * 1024
     val SECOND_DISPLAY_FAILED: String get() = tr(R.string.parallel_second_display_failed)
 
     fun detect(sdk: Int, lowRam: Boolean, userMax: Int, secondDisplayFailed: Boolean): ParallelLimit = when {
@@ -21,5 +23,18 @@ object ParallelCapability {
         lowRam -> ParallelLimit(1, tr(R.string.parallel_low_ram))
         secondDisplayFailed -> ParallelLimit(1, SECOND_DISPLAY_FAILED)
         else -> ParallelLimit(userMax.coerceIn(1, MAX), null)
+    }
+
+    /**
+     * 设备此刻是否按「低内存」处理:系统 low-RAM 标志([ActivityManager.isLowRamDevice]),
+     * 或可用内存已跌到 [LOW_RAM_AVAIL_BYTES](~166MB)以下。低内存时限 1 并行
+     * (见 [detect] 的 lowRam 分支)。调用方把结果作为 [detect] 的 [lowRam] 传入。
+     */
+    fun isLowRamDevice(context: android.content.Context): Boolean {
+        val am = context.getSystemService(android.app.ActivityManager::class.java) ?: return false
+        if (am.isLowRamDevice()) return true
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return mi.availMem <= LOW_RAM_AVAIL_BYTES
     }
 }

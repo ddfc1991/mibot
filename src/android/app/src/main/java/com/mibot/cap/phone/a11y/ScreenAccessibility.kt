@@ -73,7 +73,7 @@ open class ScreenAccessibility : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             windowGeneration.incrementAndGet()
         }
-        val app = application as? com.mibot.MikaApp
+        val app = application as? com.mibot.MikaHost
         val access = app?.appAccess?.current()
         if (access != null && access.denial(event.packageName?.toString()) != null) return
         if (app != null && app.teachReady && app.teach.wantsEvents()) {

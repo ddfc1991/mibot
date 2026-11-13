@@ -15,7 +15,7 @@ import com.mibot.core.shell.BuiltinShellStatus
 import com.mibot.core.shell.PairingChannelHealth
 import com.mibot.core.shell.PairingDiscovery
 import com.mibot.core.shell.PhoneSetupFlow
-import com.mibot.ui.MainActivity
+import com.openminis.app.MainActivity
 import com.mibot.ui.PhoneSetupCopy
 import com.mibot.setup.PairingCodeReceiver
 

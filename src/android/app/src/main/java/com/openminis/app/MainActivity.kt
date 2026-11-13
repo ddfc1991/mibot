@@ -191,14 +191,9 @@ class MainActivity : ComponentActivity() {
                 runCatching { com.openminis.app.mibot.mail.MailDemo.seed(this) }
                 runCatching { com.openminis.app.mibot.vault.AutoKeyDemo.seed(this) }
             }
-            // [fork/mibot-v3] CI: write the "start from a computer" helper script
-            // (adb shell sh …/usb-start.sh) and/or auto-run the hidden-display demo.
-            if (intent?.getBooleanExtra("ci_vd_usb", false) == true) {
-                com.openminis.app.mibot.phone.MibotPhone.get(this).writeUsbScript()
-            }
-            if (intent?.getBooleanExtra("ci_vd_demo", false) == true) {
-                com.openminis.app.mibot.phone.VdDemo.autoDemo = true
-            }
+            // [fork/mibot-merge] Mika cap.phone replaced the old MibotPhone
+            // virtual-display stack; the ci_vd_usb / ci_vd_demo CI extras no longer
+            // have a target and are intentionally ignored.
         }
 
         // Register the crash-share "Save to..." launcher BEFORE the
@@ -680,10 +675,9 @@ class MainActivity : ComponentActivity() {
                 // a floating banner over every screen (iOS ContentView).
                 com.openminis.app.ui.settings.NetworkAlertBannerHost(navController)
 
-                // [fork/mibot-v3] Small live view of the hidden display while the agent works.
-                com.openminis.app.mibot.phone.VdMiniView(onOpen = {
-                    navController.navigate(com.openminis.app.mibot.phone.VdRoutes.PAGE) { launchSingleTop = true }
-                })
+                // [fork/mibot-merge] The old VdMiniView (hidden-display live
+                // preview) was removed with the mibot/phone stack; Mika cap.phone
+                // operates the real screen, so no inline preview is shown here.
 
                 // [fork/mibot-autokey-v2] The AutoKey connect sheet + its WebView, hosted at the root so
                 // a run keeps its page when the user leaves 自动发现并连接 (it used to be destroyed there).

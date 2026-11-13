@@ -144,7 +144,7 @@ class HelperHub(context: Context) {
  * 内置助手交接 Binder 的入口。要对 shell 开放所以是 exported,清单里另要求 INTERACT_ACROSS_USERS_FULL
  * (shell 有,普通 App 没有),普通 App 连 provider 都拿不到;真正的把关在 [HelperHub.offer]。
  * 落点是 App 的那一份([PhoneServices.of]):App 对象在 provider 之前就构造好了,但交接调用可能早于或与 Application.onCreate 同时到达;
- * 安全靠 MikaApp.phone 与 [HelperHub] 里口令都是同步的 lazy(谁先到谁建、只建一次),[HelperHub.offer] 本身也加了锁,不依赖 onCreate 先跑完。
+ * 安全靠 PhoneServices.shellManager(配对/起助手)与 [HelperHub] 里口令都是同步的 lazy(谁先到谁建、只建一次),[HelperHub.offer] 本身也加了锁,不依赖 onCreate 先跑完。
  */
 open class HandoffProvider : ContentProvider() {
     override fun onCreate() = true

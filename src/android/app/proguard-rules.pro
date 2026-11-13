@@ -27,7 +27,5 @@
 # there. Any change here must be checked against an assembleRelease APK.
 -keep class io.codeconcept.realtimecutvadlibrary.** { *; }
 
-# [fork/mibot-v3] Background phone-control helper: started by class name via
-# app_process (CLASSPATH=base.apk ... com.openminis.app.mibot.phone.HelperMain),
-# and reaches hidden framework APIs by reflection.
--keep class com.openminis.app.mibot.phone.** { *; }
+# [fork/mibot-merge] The old mibot/phone helper (HelperMain / com.openminis.app.mibot.phone)
+# was removed; Mika cap.phone (com.mibot.cap.phone.shell) is the sole phone stack.

@@ -37,7 +37,7 @@ android {
         // Minis (com.openminis.app). `namespace` stays com.openminis.app, so R /
         // BuildConfig / class names are unchanged; anything that needs the
         // installed package must use context.packageName or BuildConfig.APPLICATION_ID.
-        applicationId = "com.destiny.app"
+        applicationId = "com.mikova.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 47

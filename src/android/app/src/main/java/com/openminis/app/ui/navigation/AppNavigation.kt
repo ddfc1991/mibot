@@ -220,6 +220,14 @@ object Routes {
         if (taskId == null) "scheduled_tasks/edit" else "scheduled_tasks/edit?taskId=$taskId"
     // [T-android-scheduled-tasks-run-records] per-task execution log.
     const val SCHEDULED_TASK_RUNS = "scheduled_tasks/runs/{taskId}"
+
+    // [destiny/mibot-capability] 5 个能力页 Screen（DestinyCapabilityScreens.kt）。
+    const val MIBOT_WECHAT = "mibot_wechat"
+    const val MIBOT_APP_ACCESS = "mibot_app_access"
+    const val MIBOT_WALLET = "mibot_wallet"
+    const val MIBOT_VOICE = "mibot_voice"
+    const val MIBOT_TASK_QUEUE = "mibot_task_queue"
+
     fun scheduledTaskRuns(taskId: String): String = "scheduled_tasks/runs/$taskId"
 
     fun logDetail(fileName: String) = "log_detail/$fileName"
@@ -312,12 +320,15 @@ fun AppNavigation(
                 )
                 navController.safeNavigate(Routes.ENV_VARS)
             }
-            // T183: any settings screen reachable by route string. The
-            // parser already resolved the path → route mapping so we
-            // just navigate.
-            is DeepLinkAction.OpenSettingsScreen -> {
-                navController.safeNavigate(initialDeepLink.route)
-            }
+            // T183: any settings screen reachable by route string.
+            // [destiny/v7-deeplink] Handled by startDestination below: the
+            // NavHost mounts DIRECTLY on the target route, so this branch
+            // must not navigate again (it would stack a duplicate entry).
+            // The old safeNavigate() here was dead code on cold start —
+            // the start entry is not RESUMED yet mid-composition, the
+            // guard dropped the call, and minis://settings/voice (and
+            // every other settings link) silently landed on home.
+            is DeepLinkAction.OpenSettingsScreen -> {}
             is DeepLinkAction.OpenPermissionSettings -> {
                 navController.safeNavigate(Routes.PERMISSIONS)
             }
@@ -339,6 +350,13 @@ fun AppNavigation(
             else -> {}
         }
     }
+
+    // [destiny/v7-deeplink] Warm-start deep links no longer need a Compose-side
+    // hook: MainActivity.onNewIntent → handleDeepLink already navigates
+    // synchronously for OpenSettingsScreen (no RESUMED guard on that path),
+    // and cold-start links are handled by startDestination below. Anything
+    // registered here only duplicated those navigations and stacked
+    // duplicate back-stack entries.
 
     // Resolve launch session preference once into a deferred navigation target.
     // T314: this LaunchedEffect fires the same frame the NavHost mounts, so
@@ -551,8 +569,43 @@ fun AppNavigation(
             Routes.chat(htmlShortcut.sessionId)
         }
         quickActionStart != null -> quickActionStart
-        else -> Routes.SESSION_LIST
+        // [destiny/v7-deeplink] Settings-screen deep links (voice / servers /
+        // home / v7-screen/<id> / spec) mount the NavHost DIRECTLY on the
+        // target route. Navigating after composition (the old
+        // LaunchedEffect → safeNavigate path) was silently swallowed by
+        // safeNavigate's RESUMED guard: during cold start the freshly
+        // mounted start entry is not RESUMED yet, so every minis://settings
+        // link landed on the home screen instead. No navigation needed now,
+        // so no timing window can drop it.
+        initialDeepLink is DeepLinkAction.OpenSettingsScreen -> initialDeepLink.route
+        // [destiny/v7-full] The 56-screen design spec IS the app UI now.
+        // The original native chat scaffold stays reachable as 「原功能」.
+        else -> "destiny_v7_home"
     }
+    // [destiny/v7-full] One action bundle shared by every V7 screen, so each
+    // design screen can reach the real chat / voice / servers / MCP features.
+    val v7Actions = com.openminis.app.mibot.v7.V7Actions(
+        onAction = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
+        onVoice = { navController.safeNavigate("destiny_voice") },
+        onServers = { navController.safeNavigate("destiny_servers") },
+        onNewChat = { navController.safeNavigate(Routes.chat("__new__${java.util.UUID.randomUUID()}")) },
+        onFeed = { navController.safeNavigate(com.openminis.app.ui.glass.GlassRoutes.FEED) },
+        onAgents = { navController.safeNavigate(Routes.AGENTS) },
+        onMcp = { navController.safeNavigate(Routes.MCP) },
+        onLegacy = { navController.safeNavigate(Routes.SESSION_LIST) },
+        onIndex = { navController.safeNavigate("destiny_spec") },
+        // [destiny] 能力格直达真实功能页。
+        onPhoneControl = { },
+        onWechat = { navController.safeNavigate(Routes.MIBOT_WECHAT) },
+        onAppAccess = { navController.safeNavigate(Routes.MIBOT_APP_ACCESS) },
+        onWallet = { navController.safeNavigate(Routes.MIBOT_WALLET) },
+        onSandbox = { navController.safeNavigate(com.openminis.app.mibot.sandbox.SandboxRoutes.SANDBOX) },
+        onMonitor = { navController.safeNavigate(com.openminis.app.mibot.settings.DiagnosticsRoutes.DIAGNOSTICS) },
+        // [destiny/v7-real] Screen 01 rows open REAL sessions.
+        onOpenSession = { id -> navController.safeNavigate(Routes.chat(id)) },
+        // [destiny/v7-real] Settings tab rows open the REAL screens.
+        onNavigate = { route -> navController.safeNavigate(route) },
+    )
     // [fork/mibot-v2] One shared backdrop behind every screen; the Mibot
     // scheme makes Scaffold containers transparent so it shows through.
     val mibotOn = com.openminis.app.ui.theme.LocalMibotActive.current
@@ -667,17 +720,22 @@ fun AppNavigation(
                 onSelect = { navController.navigateToGlassTab(it) },
                 scrollUnder = true,
             ) {
-                // [fork/mibot-feed] Real 动态 (filesDir/feed); 讨论 opens a new chat prefilled.
-                com.openminis.app.mibot.feed.FeedPage(
+                // [destiny/v7] 动态 is three states: 在看 / 想到的 / 能领的.
+                // Ideas moved in from the removed bottom tab; free quotas live
+                // in 能领的. Every state is a real, persisted screen.
+                com.openminis.app.mibot.feed.DestinyFeedHost(
                     onDiscuss = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
                     onOpenSession = { id -> navController.safeNavigate(Routes.chat(id)) },
                     onOpenGroup = { id -> navController.safeNavigate(com.openminis.app.mibot.groups.GroupRoutes.chat(id)) },
+                    onChat = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
                 )
             }
         }
         composable(com.openminis.app.ui.glass.GlassRoutes.IDEAS) {
             com.openminis.app.ui.glass.GlassTabShell(
-                current = com.openminis.app.ui.glass.GlassTab.IDEAS,
+                // [destiny/v7] IDEAS has no tab anymore — keep 动态 highlighted
+                // if a deep link still lands on this legacy route.
+                current = com.openminis.app.ui.glass.GlassTab.FEED,
                 onSelect = { navController.navigateToGlassTab(it) },
                 scrollUnder = true,
             ) {
@@ -758,6 +816,10 @@ fun AppNavigation(
                         files = { mibotOpenRootfsFiles(glassContext, navController) },
                         network = go(Routes.NETWORK),
                         tailscale = go(Routes.NETWORK_TAILSCALE),
+                        // [destiny/v7] 服务器管理 sits in the Tailscale group.
+                        servers = go("destiny_servers"),
+                        voice = go("destiny_voice"),
+                        allScreens = go("destiny_spec"),
                         proxies = go(Routes.NETWORK_PROXIES),
                         permissions = go(Routes.PERMISSIONS),
                         background = go(Routes.BACKGROUND),
@@ -765,7 +827,7 @@ fun AppNavigation(
                         diagnostics = go(com.openminis.app.mibot.settings.DiagnosticsRoutes.DIAGNOSTICS),
                         reportBug = { com.openminis.app.ui.glass.ForkBugReport.open(glassContext) },
                         about = go(Routes.ABOUT),
-                        virtualDisplay = go(com.openminis.app.mibot.phone.VdRoutes.PAGE),
+                        virtualDisplay = { },
                         plugins = go(com.openminis.app.mibot.plugins.PluginRoutes.MARKET),
                         mail = { com.openminis.app.mibot.mail.MailRoutes.pendingTab = "全部"; navController.safeNavigate(com.openminis.app.mibot.mail.MailRoutes.LEDGER) },
                         aiMail = { com.openminis.app.mibot.mail.MailRoutes.pendingTab = "AI 邮箱"; navController.safeNavigate(com.openminis.app.mibot.mail.MailRoutes.LEDGER) },
@@ -785,6 +847,7 @@ fun AppNavigation(
                 onEnvVarsClick = { navController.safeNavigate(Routes.ENV_VARS) },
                 onNetworkClick = { navController.safeNavigate(Routes.NETWORK) },
                 onTailscaleClick = { navController.safeNavigate(Routes.NETWORK_TAILSCALE) },
+                onServersClick = { navController.safeNavigate("destiny_servers") },
                 onProxiesClick = { navController.safeNavigate(Routes.NETWORK_PROXIES) },
                 onContainerDnsClick = { navController.safeNavigate(Routes.CONTAINER_DNS) },
                 onSkillsClick = { navController.safeNavigate(Routes.SKILLS) },
@@ -804,6 +867,78 @@ fun AppNavigation(
                 onSharedFoldersClick = { navController.safeNavigate(Routes.SHARED_FOLDERS) },
             )
           }
+        }
+
+        // [destiny/v7] 远程接入 · 服务器 (design screens 45b / 45c).
+        // Reached from Settings › Network, right below Tailscale.
+        composable("destiny_servers") {
+            com.openminis.app.mibot.v7.V7MaterialWrap {
+                com.openminis.app.mibot.servers.ServerVaultPage(
+                    onBack = { navController.safePopBackStack() },
+                    onDiscuss = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
+                )
+            }
+        }
+
+        // [destiny/v7] Screen 34 语音: real press-and-hold ASR + TTS.
+        composable("destiny_voice") {
+            com.openminis.app.mibot.v7.V7MaterialWrap {
+                com.openminis.app.mibot.voice.DestinyVoiceScreen(
+                    onBack = { navController.safePopBackStack() },
+                    onSend = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
+                )
+            }
+        }
+
+        // [destiny/honest-state] 没接后端的页（微信 / 钱包）如实说"未接入"，
+        // 不再显示写死的账号与金额。
+        composable(
+            route = "destiny_not_wired/{which}",
+            arguments = listOf(navArgument("which") { type = NavType.StringType }),
+        ) { entry ->
+            com.openminis.app.mibot.v7.DestinyV7NotWired(
+                which = entry.arguments?.getString("which") ?: "wechat",
+                onBack = { navController.safePopBackStack() },
+                onOpenPermissions = { navController.safeNavigate(Routes.PERMISSIONS) },
+                onOpenProviders = { navController.safeNavigate(Routes.PROVIDER_LIST) },
+            )
+        }
+        // [destiny/queue-real] 真实任务队列页（AgentJobRegistry），设置 › 任务队列
+        // 与对话页「查看全部」都落到这里。
+        composable("destiny_queue") {
+            com.openminis.app.mibot.v7.DestinyV7QueueScreen(
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+        // [destiny/v7-full] The 56-screen design spec, rendered as the app's
+        // REAL interface: structured V7 elements, dark palette, four tabs.
+        composable("destiny_v7_home") {
+            com.openminis.app.mibot.v7.DestinyV7Home(v7Actions, chatRepository = chatRepository)
+        }
+        composable(
+            route = "destiny_v7_screen/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) { entry ->
+            com.openminis.app.mibot.v7.DestinyV7Home(
+                actions = v7Actions,
+                initialScreen = entry.arguments?.getString("id") ?: "01",
+                chatRepository = chatRepository,
+            )
+        }
+        // Legacy routes now show the V7 UI too, so every entry point is the
+        // design spec — no path lands on the old text-only spec list any more.
+        composable("destiny_spec") {
+            com.openminis.app.mibot.v7.DestinyV7Home(v7Actions, initialIndex = true, chatRepository = chatRepository)
+        }
+        composable(
+            route = "destiny_spec/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) { entry ->
+            com.openminis.app.mibot.v7.DestinyV7Home(
+                actions = v7Actions,
+                initialScreen = entry.arguments?.getString("id") ?: "01",
+                chatRepository = chatRepository,
+            )
         }
 
         composable(Routes.BACKUP) { entry ->
@@ -1321,7 +1456,24 @@ fun AppNavigation(
         }
 
         composable(Routes.FILE_BROWSER) {
-            val vm = FilePreviewHolder.fileBrowserViewModel ?: return@composable
+            // [T-filebrowser-standalone] Settings → 文件浏览器 navigates here
+            // without any chat session having primed FilePreviewHolder, which
+            // used to `return@composable` and paint a blank white screen. Build
+            // a rootfs-rooted view model on demand so the entry always renders
+            // a real directory listing.
+            val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+            val vm = FilePreviewHolder.fileBrowserViewModel ?: remember(appCtx) {
+                val rootfs = RootfsManager.getInstance(appCtx)
+                val varMinis = java.io.File(rootfs.rootfsDir, "var/minis")
+                FileBrowserViewModel(
+                    rootPath = rootfs.rootfsDir,
+                    initialPath = varMinis.takeIf { it.exists() },
+                    rootLabel = "/",
+                    linuxRootPath = "/",
+                    sessionId = null,
+                    appContext = appCtx,
+                ).also { FilePreviewHolder.fileBrowserViewModel = it }
+            }
             FileBrowserScreen(
                 viewModel = vm,
                 onBack = { navController.safePopBackStack() },
@@ -1874,10 +2026,7 @@ fun AppNavigation(
                 onReportBug = { com.openminis.app.ui.glass.ForkBugReport.open(diagContext) },
             )
         }
-        // [fork/mibot-v3] Background control / hidden virtual display.
-        composable(com.openminis.app.mibot.phone.VdRoutes.PAGE) {
-            com.openminis.app.mibot.phone.VdScreen(onBack = { navController.safePopBackStack() })
-        }
+        // [fork/mibot-merge] VdScreen composable removed with the mibot/phone stack.
         composable(com.openminis.app.mibot.sandbox.SandboxRoutes.SANDBOX) {
             val sbContext = LocalContext.current
             com.openminis.app.mibot.sandbox.SandboxScreen(
@@ -1893,6 +2042,51 @@ fun AppNavigation(
                 onManage = { navController.safeNavigate(Routes.ROOTFS_MANAGEMENT) },
                 onMirrors = { navController.safeNavigate(Routes.ROOTFS_MANAGEMENT) },
                 onOpenTerminalCommand = { cmd -> navController.safeNavigate(Routes.terminal(cmd)) },
+            )
+        }
+
+        // [destiny/capabilities-real] 能力页全部接真实实现。
+        //
+        // 旧版这 5 条路由指向 DestinyCapabilityScreens.kt：微信（已连接 destiny_bot +
+        // 两条写死的最近消息）、钱包（¥1,284.50 / 尾号 8842）、语音（静态音色文案）、
+        // 手机控制（未分类·169 + 4 个只改本地变量的 Switch）。那些是 HTML 复刻带过来
+        // 的假页，已整文件删除。现在：
+        //   · 微信 / 钱包 → 如实「未接入」，不显示任何编造的账号与金额
+        //   · 语音 → 真实 SpeechRecognizer 页面
+        //   · 手机控制 → 真读系统无障碍状态 + 如实说明运行时未接入
+        //   · 任务队列 → 派单作业表 + 落盘执行队列，两张真表并列
+        composable(Routes.MIBOT_WECHAT) {
+            com.openminis.app.mibot.v7.DestinyV7NotWired(
+                which = "wechat",
+                onBack = { navController.safePopBackStack() },
+                onOpenPermissions = { navController.safeNavigate(Routes.PERMISSIONS) },
+                onOpenProviders = { navController.safeNavigate(Routes.PROVIDER_LIST) },
+            )
+        }
+        composable(Routes.MIBOT_APP_ACCESS) {
+            com.openminis.app.mibot.v7.DestinyV7AppAccessScreen(
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+        composable(Routes.MIBOT_WALLET) {
+            com.openminis.app.mibot.v7.DestinyV7NotWired(
+                which = "wallet",
+                onBack = { navController.safePopBackStack() },
+                onOpenPermissions = { navController.safeNavigate(Routes.PERMISSIONS) },
+                onOpenProviders = { navController.safeNavigate(Routes.PROVIDER_LIST) },
+            )
+        }
+        composable(Routes.MIBOT_VOICE) {
+            com.openminis.app.mibot.v7.V7MaterialWrap {
+                com.openminis.app.mibot.voice.DestinyVoiceScreen(
+                    onBack = { navController.safePopBackStack() },
+                    onSend = { text -> com.openminis.app.mibot.feed.openChatWithDraft(navController, text) },
+                )
+            }
+        }
+        composable(Routes.MIBOT_TASK_QUEUE) {
+            com.openminis.app.mibot.v7.DestinyV7QueueScreen(
+                onBack = { navController.safePopBackStack() },
             )
         }
     }

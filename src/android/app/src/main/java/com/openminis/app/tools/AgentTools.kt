@@ -70,8 +70,9 @@ object AgentTools {
         if (!isHelper) {
             add(com.openminis.app.mibot.agent.MibotTools.vaultDefinition())
             add(com.openminis.app.mibot.agent.MibotTools.providerDefinition())
-            // [fork/mibot-v3] Background phone control on a hidden virtual display.
-            addAll(com.openminis.app.mibot.phone.VdTools.definitions())
+            // [fork/mibot-merge] The old vd_* hidden-virtual-display agent tools
+            // (VdTools) were removed with the mibot/phone stack; Mika cap.phone
+            // is the sole phone stack and does not expose these yet.
             addAll(com.openminis.app.mibot.plugins.DshAgentTools.definitions()) // [fork/mibot-dsh-tools] D3
         }
         if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())

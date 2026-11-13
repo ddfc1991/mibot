@@ -14,6 +14,7 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
+import com.mibot.cap.phone.a11y.ScreenAccessibility
 import com.openminis.app.logging.AppLogger
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
@@ -24,8 +25,17 @@ import java.util.concurrent.TimeUnit
  * MinisAccessibilityService — host-side AccessibilityService backing the
  * `android-a11y-cli` offload command. The user must enable it manually
  * under Settings → Accessibility; we never start it programmatically.
+ *
+ * [fork/mibot-merge] This is now the SINGLE registered accessibility service for
+ * the whole app: it extends Mika's [ScreenAccessibility] (com.mibot.cap.phone.a11y)
+ * so the cap.phone stack (gestures, screenshots, event/notification flows,
+ * overlays) and the host-side `android-a11y-cli` surface (node registry, window
+ * info, pinch/shot helpers) share ONE running service instance and ONE manifest
+ * registration. `ScreenAccessibility.instance` and this class's [getInstance]
+ * both point to the same live object — the cap code and the offload CLI route
+ * into the same service.
  */
-class MinisAccessibilityService : AccessibilityService() {
+class MinisAccessibilityService : ScreenAccessibility() {
 
     companion object {
         private const val TAG = "MinisA11y"
@@ -59,6 +69,8 @@ class MinisAccessibilityService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
+        // super (ScreenAccessibility) sets ScreenAccessibility.instance = this and
+        // re-asserts FLAG_INCLUDE_NOT_IMPORTANT_VIEWS at runtime.
         super.onServiceConnected()
         _instance = this
         // [T-android-a11y-miui-service-failure] Breadcrumb on (re)bind. On OEM
@@ -80,8 +92,11 @@ class MinisAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // Route into Mika's cap.phone flows FIRST (event/notification/window
+        // streams, appAccess denial, teach capture) — one service feeds both the
+        // cap stack and the host-side event ring below.
+        super.onAccessibilityEvent(event)
         val rec = RecordedEvent(
             type = AccessibilityEvent.eventTypeToString(event.eventType),
             packageName = event.packageName?.toString(),
@@ -97,10 +112,12 @@ class MinisAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        super.onInterrupt() // ScreenAccessibility.onInterrupt is a no-op; kept for symmetry
         AppLogger.info(TAG, "service interrupted")
     }
 
     override fun onDestroy() {
+        // super (ScreenAccessibility) clears ScreenAccessibility.instance + overlayHost.
         super.onDestroy()
         if (_instance === this) _instance = null
         eventRing.clear()

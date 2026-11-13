@@ -231,7 +231,8 @@ object DeepLinkHandler {
             }
             "capabilities", "automation" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.settings.CapRoutes.PAGE)
             "sandbox" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.sandbox.SandboxRoutes.SANDBOX)
-            "virtual-display", "vd", "background-control" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.phone.VdRoutes.PAGE)
+            // [fork/mibot-merge] "virtual-display"/"vd"/"background-control" deep links
+            // retired with the mibot/phone stack; fall through to diagnostics.
             "diagnostics" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.settings.DiagnosticsRoutes.DIAGNOSTICS)
             "about" -> DeepLinkAction.OpenSettingsScreen(Routes.ABOUT)
             "network" -> DeepLinkAction.OpenSettingsScreen(Routes.NETWORK)

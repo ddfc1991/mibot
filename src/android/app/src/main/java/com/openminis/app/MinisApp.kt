@@ -57,15 +57,18 @@ import com.openminis.app.sandbox.offload.SpeechOffloadHandler
 import com.openminis.app.sandbox.offload.WeatherOffloadHandler
 import com.openminis.app.service.SessionActivityTracker
 import com.openminis.app.ui.MinisImageFetcher
+import com.mibot.MikaHost
 import com.mibot.cap.web.PageKeeper
 import com.mibot.cap.web.SiteRegistry
 import com.mibot.cap.web.TabBudget
 import com.mibot.cap.web.WebOwner
 import com.mibot.cap.web.cdp.WebDevtools
+import com.mibot.settings.AppAccessStore
+import com.mibot.teach.TeachRuntime
 import kotlinx.coroutines.launch
 import java.io.File
 
-class MinisApp : Application(), ImageLoaderFactory, WebOwner {
+class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost {
     /**
      * T-android-safemode-lateinit-crash: true once the heavy subsystem
      * block in [onCreate] has fully run (DB + every repository assigned).
@@ -250,6 +253,17 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner {
     override val webSites: SiteRegistry by lazy { SiteRegistry(mikaSitesDir) }
     override val tabBudget: TabBudget by lazy { TabBudget() }
     override val pageKeeper: PageKeeper by lazy { PageKeeper(this, tabBudget) }
+
+    // [fork/mibot-merge] MikaHost wiring: the cap stack reads appAccess/teach via
+    // `application as? MikaHost`. appAccess is file-backed (no records => allow all),
+    // so the a11y event-denial check behaves like before (access was null) until the
+    // user actually configures per-app access. teachReady stays false (interface
+    // default) until the full Mika TeachRuntime is wired into the AgentLoop.
+    override val appAccess: AppAccessStore? by lazy {
+        runCatching { AppAccessStore(File(filesDir, "mika-app-access.json")) }.getOrNull()
+    }
+
+    override val teach: TeachRuntime by lazy { TeachRuntime() }
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
@@ -782,8 +796,6 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner {
         NativeOffloadServer.register("android-player", PlayerOffloadHandler())
         // [fork/mibot-v2] Account vault CLI offload.
         NativeOffloadServer.register("vault", com.openminis.app.mibot.vault.VaultOffloadHandler(this))
-        // [fork/mibot-v3] `mibot-vd`: background phone control from the sandbox.
-        NativeOffloadServer.register("mibot-vd", com.openminis.app.mibot.phone.VdOffloadHandler(this))
         // [fork/mibot-v5b2] `mibot-mail`: 临时邮箱 / AI 邮箱 from the sandbox.
         NativeOffloadServer.register("mibot-mail", com.openminis.app.mibot.mail.MailOffloadHandler(this))
         // Debug/CI builds: loopback mail platform + local demo console (labelled 演示 everywhere).
@@ -836,9 +848,9 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner {
         // up the binder lifecycle listeners + StateFlow.
         NativeOffloadServer.register("android-shizuku-cli", ShizukuOffloadHandler(this))
         com.openminis.app.offload.ShizukuManager.init(this)
-        // [fork/mibot-v3] Background phone control: watchdog that reconnects the
-        // paired Wireless-Debugging helper (no-op until the user pairs).
-        runCatching { com.openminis.app.mibot.phone.MibotPhone.get(this).start() }
+        // [fork/mibot-merge] Mika cap.phone is the sole phone stack now; its helper
+        // watchdog/restore is driven by PhoneServices/BootRestoreHandler, not the
+        // deleted MibotPhone virtual-display entry point.
 
         // T-android-minis-debug-cli: shell-side CLI wrapper around the in-app
         // DebugServer (127.0.0.1:5321) JSON-RPC. DEBUG-only — Release builds
@@ -1320,6 +1332,14 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner {
         // signal we care about for [LaunchCycleBeacon].
         try {
             com.openminis.app.diagnostics.LaunchCycleBeacon.recordCleanExit(this)
+        } catch (t: Throwable) {
+            Log.w("MinisApp", "LaunchCycleBeacon.recordCleanExit failed: ${t.message}")
+        }
+        super.onTerminate()
+    }
+
+}
+his)
         } catch (t: Throwable) {
             Log.w("MinisApp", "LaunchCycleBeacon.recordCleanExit failed: ${t.message}")
         }

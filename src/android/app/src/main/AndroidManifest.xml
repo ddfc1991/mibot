@@ -696,6 +696,12 @@
         <receiver
             android:name="com.mibot.cap.phone.setup.PairingCodeInput"
             android:exported="false" />
+        <!-- [fork/mibot-merge] PairingNotifier's RemoteInput reply targets this concrete
+             subclass (its own doc says "清单与通知里用的是这个全名"); register it so the
+             pairing-code reply broadcast is delivered. -->
+        <receiver
+            android:name="com.mibot.setup.PairingCodeReceiver"
+            android:exported="false" />
         <provider
             android:name="com.mibot.cap.phone.shell.HandoffProvider"
             android:authorities="${applicationId}.handoff"
@@ -728,22 +734,11 @@
         <!-- [fork/mibot-v3] Background phone control (adapted from Mika, Apache-2.0).
              The helper (shell uid) hands its Binder over this provider; INTERACT_ACROSS_USERS_FULL
              keeps normal apps out, HelperHub.offer checks uid/pid/APK/one-time nonce. -->
-        <provider
-            android:name="com.openminis.app.mibot.phone.HandoffProvider"
-            android:authorities="${applicationId}.mibothelper"
-            android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-        <receiver
-            android:name="com.openminis.app.mibot.phone.PairingCodeReceiver"
-            android:exported="false" />
-        <service
-            android:name="com.openminis.app.mibot.phone.VdForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="AI agent operating apps on a hidden virtual display, started and stoppable by the user" />
-        </service>
+        <!-- [fork/mibot-merge] The old mibot/phone virtual-display components
+             (HandoffProvider / PairingCodeReceiver / VdForegroundService) were
+             removed with the com.openminis.app.mibot.phone stack. Mika cap.phone
+             registers its own HandoffProvider (com.mibot.cap.phone.shell) and
+             BootRestoreHandler above; the helper process is the foreground
+             service for phone control now. -->
     </application>
 </manifest>

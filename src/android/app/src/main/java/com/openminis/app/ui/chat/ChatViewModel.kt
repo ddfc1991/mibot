@@ -14149,9 +14149,8 @@ class ChatViewModel(
             com.openminis.app.mibot.agent.MibotTools.PROVIDER_TOOL ->
                 return com.openminis.app.mibot.agent.MibotTools.executeProvider(context, providerRepository, argsJson)
         }
-        if (name in com.openminis.app.mibot.phone.VdTools.NAMES) {
-            return com.openminis.app.mibot.phone.VdTools.execute(context, name, argsJson)
-        }
+        // [fork/mibot-merge] The vd_* tool dispatch (VdTools) was removed with
+        // the mibot/phone stack; Mika cap.phone is the sole phone stack.
         if (com.openminis.app.mibot.plugins.DshAgentTools.isPluginTool(name)) { // [fork/mibot-dsh-tools] D3
             return com.openminis.app.mibot.plugins.DshAgentTools.execute(context, name, argsJson, toolId, assistantId)
         }
