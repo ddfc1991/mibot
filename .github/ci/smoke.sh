@@ -2,20 +2,79 @@
 # Emulator smoke test: install, launch, capture key screens of the glass UI.
 # Usage: smoke.sh <apk> <outdir>
 set -uo pipefail
-APK="$1"; OUT="$2"; PKG=com.dl1991.mibot  # applicationId; activity classes stay in namespace com.openminis.app
+APK="$1"; OUT="$2"
 mkdir -p "$OUT"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 fail=0
+link_count=0
 
-shot() { sleep "${2:-3}"; adb exec-out screencap -p > "$OUT/$1.png"; echo "shot: $1 ($(stat -c%s "$OUT/$1.png") bytes)"; }
-alive() { adb shell pidof $PKG >/dev/null 2>&1; }
+# Preserve evidence even when install or ActivityManager fails before the UI walk.
+finish() {
+  local result=$?
+  trap - EXIT
+  adb logcat -d -v time > "$OUT/logcat.txt" 2>&1 || true
+  grep -E "FATAL EXCEPTION" -A30 "$OUT/logcat.txt" | head -120 > "$OUT/crash.txt" || true
+  if [ -s "$OUT/crash.txt" ]; then
+    echo "::error::crash in logcat"; cat "$OUT/crash.txt"; result=1
+  fi
+  if [ "$result" -ne 0 ]; then
+    adb shell dumpsys activity activities > "$OUT/activities.txt" 2>&1 || true
+    adb shell dumpsys window > "$OUT/window.txt" 2>&1 || true
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb exec-out cat /sdcard/ui.xml > "$OUT/last-ui.xml" || true
+    adb exec-out screencap -p > "$OUT/failure.png" 2>/dev/null || true
+  fi
+  exit "$result"
+}
+trap finish EXIT
+abort() { echo "::error::$*"; exit 1; }
+
+# applicationId comes from the built APK, not the Kotlin namespace or repo name.
+AAPT2="$(command -v aapt2 || true)"
+if [ -z "$AAPT2" ]; then
+  for candidate in "${ANDROID_HOME:-}/build-tools/"*/aapt2 "${ANDROID_SDK_ROOT:-}/build-tools/"*/aapt2; do
+    if [ -x "$candidate" ]; then AAPT2="$candidate"; fi
+  done
+fi
+[ -n "$AAPT2" ] || abort "aapt2 not found; install Android SDK build-tools"
+"$AAPT2" dump badging "$APK" > "$OUT/apk-badging.txt" 2> "$OUT/apk-badging-error.txt" || abort "cannot read APK metadata"
+PKG="$(python3 -c 'import re, sys; text = open(sys.argv[1]).read(); match = re.search(r"^package: name=\x27([A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)+)\x27", text, re.M); sys.exit(1) if match is None else print(match.group(1))' "$OUT/apk-badging.txt")" || abort "APK metadata has no valid applicationId"
+echo "$PKG" | tee "$OUT/package.txt"
+
+alive() { adb shell pidof "$PKG" >/dev/null 2>&1; }
+shot() { sleep "${2:-3}"; alive || abort "app died before screenshot $1"; adb exec-out screencap -p > "$OUT/$1.png"; echo "shot: $1 ($(stat -c%s "$OUT/$1.png") bytes)"; }
 tap() { python3 "$HERE/tap.py" "$@"; }
-launch() { adb shell am start -W -n $PKG/com.openminis.app.MainActivity --ez glass_demo true > "$OUT/start-$1.txt"; }
+start() {
+  local log="$1"; shift
+  if ! adb shell am start -W "$@" > "$log" 2>&1; then
+    cat "$log"; abort "ActivityManager failed ($log)"
+  fi
+  # am can return exit code 0 while reporting a missing activity on stderr.
+  if grep -qE '^Error([ :]|$)|Exception|^Status: (timeout|error|failed)' "$log"; then
+    cat "$log"; abort "ActivityManager rejected launch ($log)"
+  fi
+}
+launch() { start "$OUT/start-$1.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true; }
+link() {
+  link_count=$((link_count + 1))
+  # Keep the URI quoted for Android's remote shell as well (query strings).
+  start "$OUT/link-$link_count.txt" -a android.intent.action.VIEW -d "'minis://settings/$1'" "$PKG"
+}
+# V7 currently exposes the original glass scaffold through its real 原功能 entry.
+# Assert that navigation works before running all existing glass tab checks.
+legacy() {
+  for attempt in 1 2 3; do
+    if tap text "原功能"; then sleep 3; return; fi
+    adb shell input swipe 540 1700 540 700 400; sleep 2
+  done
+  abort "V7 原功能 entry not found"
+}
 
 adb shell getprop ro.product.cpu.abilist | tee "$OUT/abilist.txt"
 adb logcat -c || true
-adb install -r -g "$APK" 2>&1 | tee "$OUT/install.txt"
-grep -q Success "$OUT/install.txt" || { echo "::error::install failed"; exit 1; }
+if ! adb install -r -g "$APK" 2>&1 | tee "$OUT/install.txt"; then abort "install failed"; fi
+grep -q '^Success' "$OUT/install.txt" || abort "install did not report success"
+adb shell pm path "$PKG" > "$OUT/package-path.txt" 2>&1 || abort "installed package query failed"
+grep -q '^package:' "$OUT/package-path.txt" || abort "APK package $PKG is not installed"
 
 adb shell settings put system screen_off_timeout 1800000 || true
 adb shell svc power stayon true || true
@@ -26,20 +85,22 @@ adb shell wm dismiss-keyguard || true
 # chats/groups so a fresh emulator has something to render.
 launch en
 sleep 25
-alive || { echo "::error::app not running after launch"; fail=1; }
+alive || abort "app not running after launch"
+shot 00-entry 1
+legacy
 shot 01-chats 2
 
-tap desc "Open sidebar" && shot 02-sidebar 3 || { echo "::warning::sidebar button not found"; fail=1; }
+tap desc "Open sidebar" && shot 02-sidebar 3 || abort "sidebar button not found"
 adb shell input keyevent KEYCODE_BACK; sleep 2
 
 for t in Feed:03-feed Ideas:04-ideas "Group chats":05-groups Settings:06-settings; do
   name="${t%%:*}"; file="${t##*:}"
-  if tap desc "$name"; then shot "$file" 3; else echo "::warning::tab $name not found"; fail=1; fi
+  if tap desc "$name"; then shot "$file" 3; else abort "tab $name not found"; fi
 done
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 
-adb shell am start -W -a android.intent.action.VIEW -d "minis://settings/backdrop" $PKG >/dev/null
+link backdrop
 shot 08-backdrop-settings 4
 
 # Style B (warm white): switch, look at Chats + sidebar, then switch back to A.
@@ -49,7 +110,7 @@ if tap text "Warm white"; then
   tap desc "Chats" && shot 12-chats-warm 3
   tap desc "Open sidebar" && shot 13-sidebar-warm 3
   adb shell input keyevent KEYCODE_BACK; sleep 2
-  adb shell am start -W -a android.intent.action.VIEW -d "minis://settings/backdrop" $PKG >/dev/null; sleep 3
+  link backdrop; sleep 3
   tap text "Dusk glass" || true
   adb shell input keyevent KEYCODE_BACK; sleep 2
 fi
@@ -59,25 +120,30 @@ tap desc "Chats" >/dev/null 2>&1 || true
 # debug-only launch extras (MainActivity); language applies from the next
 # process start on API < 33, so seed once, then relaunch per theme.
 ZH="$OUT/zh"; mkdir -p "$ZH"
-zlaunch() { adb shell am force-stop $PKG; sleep 1
-  adb shell am start -W -n $PKG/com.openminis.app.MainActivity --ez glass_demo true \
-    --es ci_lang zh-CN --ez ci_vault_demo true --ei ci_theme "$1" > "$ZH/start-$2.txt"; sleep "${3:-12}"; }
-zshot() { sleep "${2:-3}"; adb exec-out screencap -p > "$ZH/$1.png"; echo "zh shot: $1 ($(stat -c%s "$ZH/$1.png") bytes)"; }
-link() { adb shell am start -W -a android.intent.action.VIEW -d "minis://settings/$1" $PKG >/dev/null; }
+zlaunch() { adb shell am force-stop "$PKG"; sleep 1
+  start "$ZH/start-$2.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true \
+    --es ci_lang zh-CN --ez ci_vault_demo true --ei ci_theme "$1"; sleep "${3:-12}"; }
+zshot() { sleep "${2:-3}"; alive || abort "app died before screenshot zh/$1"; adb exec-out screencap -p > "$ZH/$1.png"; echo "zh shot: $1 ($(stat -c%s "$ZH/$1.png") bytes)"; }
 # Back to the chats tab; relaunch if Back left the app.
-front() { adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -q "$PKG"; }
+front() { adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -Fq "$PKG"; }
 home() { adb shell input keyevent KEYCODE_BACK; sleep 2
-  front || { adb shell am start -W -n $PKG/com.openminis.app.MainActivity >/dev/null; sleep 4; }
-  tap desc "对话" >/dev/null 2>&1 || true; sleep 1; }
-adb shell am force-stop $PKG; adb shell pm clear $PKG >/dev/null 2>&1 || true
+  front || { launch home; sleep 4; }
+  if ! tap desc "对话" >/dev/null 2>&1; then
+    legacy
+    tap desc "对话" || abort "glass chats tab not found after returning home"
+  fi
+  sleep 1; }
+adb shell am force-stop "$PKG"; adb shell pm clear "$PKG" >/dev/null 2>&1 || true
 zlaunch 1 seed 15
 for th in 1:light 2:dark; do
   m="${th%%:*}"; n="${th##*:}"
   zlaunch "$m" "$n" 14
-  alive || { echo "::error::app not running (zh $n)"; fail=1; }
+  alive || abort "app not running (zh $n)"
+  zshot "$n-00-entry" 1
+  legacy
   zshot "$n-01-onboarding" 1
-  tap desc "群聊" && zshot "$n-04-groups" 3 || echo "::warning::zh 群聊 tab not found ($n)"
-  tap desc "设置" && zshot "$n-05-settings" 3 || echo "::warning::zh 设置 tab not found ($n)"
+  tap desc "群聊" && zshot "$n-04-groups" 3 || abort "zh 群聊 tab not found ($n)"
+  tap desc "设置" && zshot "$n-05-settings" 3 || abort "zh 设置 tab not found ($n)"
   tap desc "对话" >/dev/null 2>&1 || true; sleep 2
   if tap desc "打开侧边栏"; then
     zshot "$n-03-sidebar" 3
@@ -96,12 +162,12 @@ for th in 1:light 2:dark; do
   link plugins;      zshot "$n-13-plugins" 10
   adb shell input swipe 540 1700 540 500 500; zshot "$n-14-plugins-scrolled" 3
   home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugins?section=desktop' $PKG" >/dev/null
+  link "plugins?section=desktop"
   zshot "$n-15-plugins-desktop" 10; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugins?tab=efficiency' $PKG" >/dev/null
+  link "plugins?tab=efficiency"
   zshot "$n-16-plugins-efficiency" 10
   adb shell input swipe 540 1700 540 500 500; zshot "$n-16b-plugins-efficiency-scrolled" 3; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=dsh-market/dsh-market' $PKG" >/dev/null
+  link "plugin?name=dsh-market/dsh-market"
   zshot "$n-17-plugin-detail" 12
   adb shell input swipe 540 1700 540 600 500; zshot "$n-18-plugin-detail-scrolled" 3; home
   # [fork/mibot-v5b2] 邮箱台账 (demo loopback boxes), AI 邮箱 tab, 权限与自动化,
@@ -111,21 +177,21 @@ for th in 1:light 2:dark; do
   link ai-mail;      zshot "$n-20-ai-mail" 6; home
   link capabilities; zshot "$n-21-capabilities" 5
   adb shell input swipe 540 1700 540 600 500; zshot "$n-21b-capabilities-scrolled" 3; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=ebony-vinyl/dsh-our-free-model' $PKG" >/dev/null
+  link "plugin?name=ebony-vinyl/dsh-our-free-model"
   zshot "$n-22-plugin-ofm" 12
   adb shell input swipe 540 1700 540 600 500; zshot "$n-22b-plugin-ofm-audit" 3
   adb shell input swipe 540 1700 540 600 500; zshot "$n-22c-plugin-ofm-more" 3; home
   # [fork/mibot-v5b4] DSH host verdicts: skill-only (手机能用), blocked (不支持), missing services (待支持).
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=alchaincyf/nuwa-skill' $PKG" >/dev/null
+  link "plugin?name=alchaincyf/nuwa-skill"
   zshot "$n-25-plugin-nuwa" 12
   adb shell input swipe 540 1700 540 600 500; zshot "$n-25b-plugin-nuwa-host" 3; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=yujunzhixue/dsh-purge' $PKG" >/dev/null
+  link "plugin?name=yujunzhixue/dsh-purge"
   zshot "$n-26-plugin-purge" 12; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=liustack/modlens' $PKG" >/dev/null
+  link "plugin?name=liustack/modlens"
   zshot "$n-27-plugin-modlens" 12; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/vault-discover?connect=hunyuan' $PKG" >/dev/null
+  link "vault-discover?connect=hunyuan"
   zshot "$n-23-connect-hunyuan" 6; home
-  adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/vault-discover?connect=github' $PKG" >/dev/null
+  link "vault-discover?connect=github"
   zshot "$n-24-connect-github" 6; home
   alive || { echo "::error::app died during zh $n pass"; fail=1; }
 done
@@ -136,7 +202,7 @@ adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb exec-out cat /s
 # The x86_64 image runs the arm64 app through native-bridge translation, so the
 # PRoot sandbox may not come up here; the plugin page then shows 失败 + its log.
 DSH="$OUT/dsh"; mkdir -p "$DSH"
-adb shell "am start -W -a android.intent.action.VIEW -d 'minis://settings/plugin?name=alchaincyf/nuwa-skill' $PKG" >/dev/null; sleep 12
+link "plugin?name=alchaincyf/nuwa-skill"; sleep 12
 if tap text "试装"; then sleep 40; fi
 adb exec-out screencap -p > "$DSH/1-installed.png"
 if tap text "启动" || { adb shell input swipe 540 1700 540 1100 500; sleep 2; tap text "启动"; }; then
@@ -161,7 +227,7 @@ SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
 if [ "${SDK:-0}" -ge 31 ]; then
   VD="$OUT/vd"; mkdir -p "$VD"
   adb shell am force-stop $PKG; sleep 1
-  adb shell am start -W -n $PKG/com.openminis.app.MainActivity --ez ci_vd_usb true > "$VD/start-usb.txt"; sleep 8
+  start "$VD/start-usb.txt" -n "$PKG/com.openminis.app.MainActivity" --ez ci_vd_usb true; sleep 8
   SCRIPT=/sdcard/Android/data/$PKG/files/usb-start.sh
   adb shell ls -l "$SCRIPT" > "$VD/script-ls.txt" 2>&1 || true
   adb shell sh "$SCRIPT" > "$VD/usb-start-out.txt" 2>&1 || true
@@ -171,7 +237,7 @@ if [ "${SDK:-0}" -ge 31 ]; then
   cat "$VD/helper-ps.txt"
   adb shell am force-stop $PKG; sleep 2
   # Relaunch (the helper must re-attach by itself), then open the page via deep link.
-  adb shell am start -W -n $PKG/com.openminis.app.MainActivity --ez ci_vd_demo true > "$VD/start-demo.txt"; sleep 12
+  start "$VD/start-demo.txt" -n "$PKG/com.openminis.app.MainActivity" --ez ci_vd_demo true; sleep 12
   link virtual-display; sleep 30
   adb exec-out screencap -p > "$VD/vd-live.png"; echo "vd shot: $(stat -c%s "$VD/vd-live.png") bytes"
   adb shell dumpsys display > "$VD/dumpsys-display.txt" 2>&1 || true
@@ -188,7 +254,4 @@ if [ "${SDK:-0}" -ge 31 ]; then
 fi
 
 alive || { echo "::error::app died during smoke test"; fail=1; }
-adb logcat -d -v time > "$OUT/logcat.txt" || true
-grep -E "FATAL EXCEPTION" -A30 "$OUT/logcat.txt" | head -120 > "$OUT/crash.txt" || true
-if [ -s "$OUT/crash.txt" ]; then echo "::error::crash in logcat"; cat "$OUT/crash.txt"; fail=1; fi
 exit $fail

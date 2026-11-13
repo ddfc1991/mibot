@@ -29,6 +29,11 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Smoke script regression tests
+        run: |
+          bash -n .github/ci/smoke.sh
+          python3 .github/ci/test_smoke.py
+
       - name: Init only the Android submodule
         run: git submodule update --init --depth 1 deps/proot
 
