@@ -78,8 +78,8 @@ class MikovaDisplayManager(private val context: Context) {
             width = display.width,
             height = display.height,
             frames = display.frames,
-            png = display::png,
-            release = display::release,
+            png = display.png,
+            release = display.release,
             ordinal = index,
         )
         _screens.value = _screens.value + screen
@@ -156,14 +156,14 @@ class MikovaDisplayManager(private val context: Context) {
         val handler = Handler(thread.looper)
         val reader = ImageReader.newInstance(SCREEN_WIDTH, SCREEN_HEIGHT, PixelFormat.RGBA_8888, 2)
         // OWN_CONTENT_ONLY(1 shl 3)| SUPPORTS_TOUCH(1 shl 6)。不带 TRUSTED:本进程无 ADD_TRUSTED_DISPLAY。
-        val flags = VirtualDisplay.FLAG_OWN_CONTENT_ONLY or VirtualDisplay.FLAG_SUPPORTS_TOUCH
+        val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or (1 shl 6) // OWN_CONTENT_ONLY | SUPPORTS_TOUCH
         val vd = displayManager.createVirtualDisplay(
             "mikova-vd-$index", SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_DPI, reader.surface, flags,
         ) ?: return null
         val state = kotlinx.coroutines.flow.MutableStateFlow<Bitmap?>(null)
         val lock = Any()
         var latest: Bitmap? = null
-        @Volatile var released = false
+        var released = false
 
         reader.setOnImageAvailableListener({ r ->
             val image = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener

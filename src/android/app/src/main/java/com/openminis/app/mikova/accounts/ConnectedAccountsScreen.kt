@@ -135,7 +135,7 @@ fun ConnectedAccountsScreen(
                                         .clip(MibotRadius.Pill)
                                         .clickable {
                                             store.remove(acc.id)
-                                            Toast.makeText(ctx, t("已断开连接", "Disconnected"), Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(ctx, com.openminis.app.mibot.design.tc(ctx, "已断开连接", "Disconnected"), Toast.LENGTH_SHORT).show()
                                         }
                                         .padding(horizontal = 10.dp, vertical = 3.dp),
                                 ) {
@@ -224,7 +224,7 @@ fun ConnectedAccountsScreen(
                     ),
                 )
                 apikeyFor = null
-                Toast.makeText(ctx, t("已保存（仅本机）", "Saved on this device"), Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, com.openminis.app.mibot.design.tc(ctx, "已保存（仅本机）", "Saved on this device"), Toast.LENGTH_SHORT).show()
             },
         )
     }

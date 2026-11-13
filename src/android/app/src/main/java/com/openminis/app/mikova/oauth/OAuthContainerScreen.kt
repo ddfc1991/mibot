@@ -82,6 +82,8 @@ fun OAuthContainerScreen(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val broker = remember { OAuthBroker.shared(ctx) }
+    // hoisted: t() is @Composable, the coroutines below are not
+    val connectedMsg = t("连接成功", "Connected")
     val provider = remember(serviceId) { OAuthProviders.get(serviceId) }
 
     var initialUrl by remember(serviceId, mode) { mutableStateOf<String?>(null) }
@@ -134,7 +136,7 @@ fun OAuthContainerScreen(
             val token = broker.exchange(p, code, verifier)
             broker.saveToken(p, token, null)
             status = "已连接 ${p.name}"
-            Toast.makeText(ctx, t("连接成功", "Connected"), Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, connectedMsg, Toast.LENGTH_SHORT).show()
             onBack()
         } catch (e: Exception) {
             status = "换取 token 失败：${e.message ?: e.javaClass.simpleName}"
@@ -160,8 +162,8 @@ fun OAuthContainerScreen(
                                 scope.launch {
                                     try {
                                         status = "已改用浏览器，请在浏览器里完成授权…"
-                                        broker.runLoopbackFlow(provider) { s -> status = s }
-                                        Toast.makeText(ctx, t("连接成功", "Connected"), Toast.LENGTH_SHORT).show()
+                                        broker.runLoopbackFlow(provider, onStep = { s -> status = s })
+                                        Toast.makeText(ctx, connectedMsg, Toast.LENGTH_SHORT).show()
                                         onBack()
                                     } catch (e: Exception) {
                                         status = "浏览器流程失败：${e.message ?: e.javaClass.simpleName}"

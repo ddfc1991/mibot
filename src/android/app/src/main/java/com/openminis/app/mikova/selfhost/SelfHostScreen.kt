@@ -23,6 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -75,7 +76,8 @@ private const val DEPLOY_DOCKER = """docker run -d --name mibot-server \
 fun SelfHostScreen(onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-    val cfg = remember { SelfHostConfig.shared(androidx.compose.ui.platform.LocalContext.current) }
+    val selfHostCtx = androidx.compose.ui.platform.LocalContext.current
+    val cfg = remember { SelfHostConfig.shared(selfHostCtx) }
     val state by cfg.config.collectAsState()
 
     var serverUrl by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }

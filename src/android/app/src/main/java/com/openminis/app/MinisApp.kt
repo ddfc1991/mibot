@@ -69,6 +69,15 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost, com.mibot.cap.phone.PhoneServices.Owner {
+
+    // [mikova] Phone control owner (com.mibot.cap.phone.PhoneServices.Owner).
+    override val phone by lazy { com.mibot.cap.phone.PhoneServices(this) }
+    // [mikova/vd] Virtual-display pool singletons (AppNavigation route "mikova/vd").
+    val vdManager by lazy { com.openminis.app.mikova.vd.MikovaDisplayManager(this) }
+    val vdController by lazy { com.openminis.app.mikova.vd.MikovaVdController(this, vdManager) }
+    // [mikova/wechat] Bridge scope (WeChatBridgeService.start at end of onCreate).
+    private val mikovaBridgeScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     /**
      * T-android-safemode-lateinit-crash: true once the heavy subsystem
      * block in [onCreate] has fully run (DB + every repository assigned).

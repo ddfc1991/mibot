@@ -817,9 +817,6 @@ fun AppNavigation(
                         network = go(Routes.NETWORK),
                         tailscale = go(Routes.NETWORK_TAILSCALE),
                         // [destiny/v7] 服务器管理 sits in the Tailscale group.
-                        servers = go("destiny_servers"),
-                        voice = go("destiny_voice"),
-                        allScreens = go("destiny_spec"),
                         proxies = go(Routes.NETWORK_PROXIES),
                         permissions = go(Routes.PERMISSIONS),
                         background = go(Routes.BACKGROUND),
@@ -847,7 +844,6 @@ fun AppNavigation(
                 onEnvVarsClick = { navController.safeNavigate(Routes.ENV_VARS) },
                 onNetworkClick = { navController.safeNavigate(Routes.NETWORK) },
                 onTailscaleClick = { navController.safeNavigate(Routes.NETWORK_TAILSCALE) },
-                onServersClick = { navController.safeNavigate("destiny_servers") },
                 onProxiesClick = { navController.safeNavigate(Routes.NETWORK_PROXIES) },
                 onContainerDnsClick = { navController.safeNavigate(Routes.CONTAINER_DNS) },
                 onSkillsClick = { navController.safeNavigate(Routes.SKILLS) },
