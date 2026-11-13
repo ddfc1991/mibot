@@ -1339,11 +1339,3 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost {
     }
 
 }
-his)
-        } catch (t: Throwable) {
-            Log.w("MinisApp", "LaunchCycleBeacon.recordCleanExit failed: ${t.message}")
-        }
-        super.onTerminate()
-    }
-
-}
