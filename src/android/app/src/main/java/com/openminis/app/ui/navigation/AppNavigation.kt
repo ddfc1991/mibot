@@ -2056,11 +2056,9 @@ fun AppNavigation(
         //   · 手机控制 → 真读系统无障碍状态 + 如实说明运行时未接入
         //   · 任务队列 → 派单作业表 + 落盘执行队列，两张真表并列
         composable(Routes.MIBOT_WECHAT) {
-            com.openminis.app.mibot.v7.DestinyV7NotWired(
-                which = "wechat",
+            com.openminis.app.mikova.wechat.WeChatBindScreen(
                 onBack = { navController.safePopBackStack() },
                 onOpenPermissions = { navController.safeNavigate(Routes.PERMISSIONS) },
-                onOpenProviders = { navController.safeNavigate(Routes.PROVIDER_LIST) },
             )
         }
         composable(Routes.MIBOT_APP_ACCESS) {
@@ -2069,11 +2067,55 @@ fun AppNavigation(
             )
         }
         composable(Routes.MIBOT_WALLET) {
-            com.openminis.app.mibot.v7.DestinyV7NotWired(
-                which = "wallet",
+            com.openminis.app.mikova.wallet.WalletScreen(
                 onBack = { navController.safePopBackStack() },
-                onOpenPermissions = { navController.safeNavigate(Routes.PERMISSIONS) },
-                onOpenProviders = { navController.safeNavigate(Routes.PROVIDER_LIST) },
+            )
+        }
+
+        // ---- Mikova module routes ----
+        composable(com.openminis.app.mikova.accounts.AccountRoutes.CENTER) {
+            com.openminis.app.mikova.accounts.ConnectedAccountsScreen(
+                onBack = { navController.safePopBackStack() },
+                onOpenOAuth = { sid ->
+                    navController.safeNavigate(com.openminis.app.mikova.oauth.OAuthRoutes.container(sid, com.openminis.app.mikova.oauth.OAuthMode.OAUTH))
+                },
+                onOpenBrowser = { sid ->
+                    navController.safeNavigate(com.openminis.app.mikova.oauth.OAuthRoutes.container(sid, com.openminis.app.mikova.oauth.OAuthMode.BROWSER))
+                },
+            )
+        }
+        composable(
+            com.openminis.app.mikova.oauth.OAuthRoutes.CONTAINER,
+            arguments = listOf(
+                navArgument("sid") { type = NavType.StringType },
+                navArgument("mode") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            com.openminis.app.mikova.oauth.OAuthContainerScreen(
+                serviceId = entry.arguments?.getString("sid").orEmpty(),
+                mode = runCatching {
+                    com.openminis.app.mikova.oauth.OAuthMode.valueOf(entry.arguments?.getString("mode") ?: "OAUTH")
+                }.getOrDefault(com.openminis.app.mikova.oauth.OAuthMode.OAUTH),
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+        composable(com.openminis.app.mikova.selfhost.SelfHostRoutes.SCREEN) {
+            com.openminis.app.mikova.selfhost.SelfHostScreen(
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+        composable("mikova/voice") {
+            com.openminis.app.mikova.voice.VoiceScreen(
+                onBack = { navController.safePopBackStack() },
+                onSend = { },
+            )
+        }
+        composable("mikova/vd") {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.openminis.app.MinisApp
+            com.openminis.app.mikova.vd.VdPoolScreen(
+                onBack = { navController.safePopBackStack() },
+                manager = app.vdManager,
+                controller = app.vdController,
             )
         }
         composable(Routes.MIBOT_VOICE) {

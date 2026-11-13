@@ -68,7 +68,7 @@ import com.mibot.teach.TeachRuntime
 import kotlinx.coroutines.launch
 import java.io.File
 
-class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost {
+class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost, com.mibot.cap.phone.PhoneServices.Owner {
     /**
      * T-android-safemode-lateinit-crash: true once the heavy subsystem
      * block in [onCreate] has fully run (DB + every repository assigned).
@@ -643,6 +643,7 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost {
         // constructor arguments. Setting it early keeps a failure in a
         // late, non-UI subsystem from permanently locking the user out
         // of an app whose UI dependencies are in fact ready.
+        com.openminis.app.mikova.wechat.WeChatBridgeService.start(this, mikovaBridgeScope)
         subsystemsInitialized = true
         // [T-update-channels] Automatic update checks on each return to the
         // foreground, throttled (24 h stable / 6 h beta); off on store builds.
