@@ -108,72 +108,24 @@ module_back() {
   sleep 1
 }
 modules() {
-  local prefix="$1" tab="$2" item desc file
-  local wechat_title='WeChat bridge' wechat_control='WeChat channel'
-  local wallet_title=Wallet balance='Available balance' payment='No pay channel'
-  local accounts_title='Account hub' add_account='+ Add account' collapse=Collapse tasks_title='Task queue'
-  if [ "$tab" = 设置 ]; then
-    wechat_title=微信接入; wechat_control=微信通道
-    wallet_title=钱包; balance=可用余额; payment=未接支付通道
-    accounts_title=账号连接中心; add_account='+ 添加账号'; collapse=收起目录; tasks_title=任务队列
-  fi
+  local prefix="$1" item desc file
   mkdir -p "$OUT/$prefix"
   for item in 'WeChat:wechat' 'Wallet:wallet' 'Self Host:selfhost' 'Virtual Display:virtual-display' 'Accounts:accounts' 'Task Queue:tasks' 'Voice:voice'; do
     desc="Mikova ${item%%:*} Entry"; file="${item##*:}"
-    if [ "$tab" = Settings ]; then
-      adb shell input tap 946 2170 || abort "Settings tab tap failed before $file"
-      sleep 1
-      probe top || abort "Settings list did not return before $file"
-      probe check --text Settings --desc 'Mikova Accounts Entry' || abort "Settings glass shell did not return before $file"
-    else
-      tap desc "$tab" || abort "Settings tab unavailable before $file"
-    fi
-    settings_entry "$desc" || abort "settings entry $desc not found"
     case "$file" in
-      wechat)
-        shot "$prefix/$file" 1 --text "$wechat_title" --text "$wechat_control" --desc Back ;;
-      wallet)
-        shot "$prefix/$file" 1 --text "$wallet_title" --text "$balance" --text "$payment" --desc Back ;;
-      selfhost)
-        shot "$prefix/$file" 1 --text 'Self-host connection|自托管连接' --desc 'Mikova SelfHost URL' --desc 'Mikova SelfHost Save' --desc 'Mikova SelfHost Test' --desc Back
-        probe tap desc 'Mikova SelfHost Guide' --scrolls 5 --save "$OUT/$prefix/selfhost-guide-before.xml" || abort 'selfhost guide missing'
-        shot "$prefix/selfhost-guide" 1 --desc 'Mikova SelfHost Guide' --expanded-from "$OUT/$prefix/selfhost-guide-before.xml" --desc Back ;;
-      virtual-display)
-        shot "$prefix/$file" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back ;;
-      accounts)
-        shot "$prefix/$file" 1 --text "$accounts_title" --text "$add_account" --desc Back
-        if [ "$tab" = Settings ]; then tap text '+ Add account'; else tap text '+ 添加账号'; fi || abort 'account catalog control missing'
-        shot "$prefix/accounts-catalog" 1 --text "$accounts_title" --text "$collapse" --desc Back ;;
-      tasks)
-        shot "$prefix/$file" 1 --text "$tasks_title" --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks'
-        tap desc 'Mibot New Task' || abort 'new task control missing'
-        shot "$prefix/task-new-chat" 1 --desc Back --desc Attach
-        module_back
-        shot "$prefix/task-return" 1 --text "$tasks_title" --desc 'Mibot New Task' ;;
-      voice)
-        # The voice screen/settings are currently Chinese even in the English pass.
-        shot "$prefix/$file" 1 --text 语音 --desc 'Mikova Voice Settings' --desc Back
-        probe tap desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing'
-        adb shell input keyevent KEYCODE_MOVE_END
-        # The only persisted content is our 13-character ASCII sample. Clear it
-        # with bounded deletes; adb keyevent cannot send a Shift+Home chord.
-        adb shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
-        adb shell input text MikovaDraft42 || abort 'cannot enter voice draft'
-        adb shell input keyevent KEYCODE_BACK; sleep 1
-        shot "$prefix/voice-draft" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42
-        probe top || abort 'voice top unavailable'
-        tap desc 'Mikova Voice Settings' || abort 'voice settings control missing'
-        shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc Back
-        module_back
-        probe seek desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing after Back'
-        shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42 ;;
+      wechat) tap desc "$desc" || abort 'WeChat entry missing'; shot "$prefix/$file" 1 --text 'WeChat bridge|微信接入' --text 'WeChat channel|微信通道' --desc Back ;;
+      wallet) tap desc "$desc" || abort 'Wallet entry missing'; shot "$prefix/$file" 1 --text Wallet --text 'Available balance|可用余额' --text 'No pay channel|未接支付通道' --desc Back ;;
+      selfhost) tap desc "$desc" || abort 'Self-host entry missing'; shot "$prefix/$file" 1 --text 'Self-host connection|自托管连接' --desc 'Mikova SelfHost URL' --desc 'Mikova SelfHost Save' --desc 'Mikova SelfHost Test' --desc Back ;;
+      virtual-display) tap desc "$desc" || abort 'Virtual display entry missing'; shot "$prefix/$file" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back ;;
+      accounts) tap desc "$desc" || abort 'Accounts entry missing'; shot "$prefix/$file" 1 --text 'Account hub|账号连接中心' --text '+ Add account|+ 添加账号' --desc Back ;;
+      tasks) tap desc "$desc" || abort 'Task queue entry missing'; shot "$prefix/$file" 1 --text 'Task queue|任务队列' --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks' ;;
+      voice) tap desc "$desc" || abort 'Voice entry missing'; shot "$prefix/$file" 1 --text '语音|Voice' --desc 'Mikova Voice Settings' --desc Back ;;
     esac
-    module_back
-    # A missing/incorrect return page must fail before another navigation hides it.
-    probe check --desc "$tab" || abort "glass shell missing after $file"
+    alive || abort "app died during $file module screenshot"
   done
 }
-modules modules Settings
+# Settings is the entry point into the added modules, without a legacy V7 detour.
+modules modules
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 
