@@ -192,15 +192,17 @@ for th in 1:light 2:dark; do
   m="${th%%:*}"; n="${th##*:}"
   zlaunch "$m" "$n" 14
   alive || abort "app not running (zh $n)"
-  zshot "$n-00-entry" 1 --text '欢迎使用 Mibot' --desc 对话
-  zshot "$n-01-onboarding" 1 --text 添加提供方 --text 选择模型
+  # ci_vault_demo configures a demo provider: the original shell opens Chat,
+  # while the initial English clean-install pass already verified onboarding.
+  zshot "$n-00-entry" 1 --text Mibot --desc 对话 --desc Conversations
+  zshot "$n-01-chat" 1 --desc Attach --desc 'Voice input' --desc Send
   tap desc 动态 && zshot "$n-feed" 1 --text 动态 --text '应用里发生的事，最新的在最上面' || abort "zh 动态 tab missing ($n)"
   tap desc 点子 && zshot "$n-ideas" 1 --text 点子 --text 新点子 || abort "zh 点子 tab missing ($n)"
   tap desc 群聊 && zshot "$n-04-groups" 1 --text 群聊 --text 新建群聊 || abort "zh 群聊 tab missing ($n)"
   tap desc 设置 && zshot "$n-05-settings" 1 --text 设置 --text 模型 || abort "zh 设置 tab missing ($n)"
   modules "zh/$n-modules" 设置
   tap desc 对话 || abort "zh 对话 tab missing ($n)"
-  tap desc 打开侧边栏 && zshot "$n-03-sidebar" 1 --desc 新对话 || abort "zh sidebar missing ($n)"
+  tap desc Conversations && zshot "$n-03-sidebar" 1 --desc 新对话 || abort "zh sidebar missing ($n)"
   tap desc 新对话 && zshot "$n-02-chat" 1 --desc Conversations --desc Attach || abort "zh new chat missing ($n)"
   # The preserved glass chat has a conversation drawer, not a top-bar Back.
   # Select Settings through its real tab rather than exiting the task with system Back.
