@@ -170,7 +170,7 @@ if a == ['exec-out', 'cat', '/sdcard/ui.xml']:
         for zh, en in [('钱包', 'Wallet'), ('可用余额', 'Available balance'), ('未接支付通道', 'No pay channel')]:
             node(t(zh, en))
     elif p == 'selfhost':
-        node('自托管连接配置')
+        node('自托管连接' if s['zh'] else 'Self-host connection')
         for label in ['URL', 'Save', 'Test']:
             node(desc=f'Mikova SelfHost {label}')
         node('收起说明' if s.get('guide') else '展开说明', desc='Mikova SelfHost Guide', target='guide')
