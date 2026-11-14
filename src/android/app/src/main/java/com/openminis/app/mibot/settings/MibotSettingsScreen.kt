@@ -171,7 +171,7 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
                 ) + ModuleRegistry.all().filter { it.showInGrid }.map { m ->
                     // [fork/mibot-modules] 只有显式 showInGrid=true 的模块才出现在应用网格；
                     // 其余（如 Mika 能力）只作能力提供者经 CapabilityBus 注入宿主功能，不单独露头.
-                    MibotGridItem(m.name, m.icon, m.color) { a.module(m.id) }
+                    MibotGridItem(m.name, m.icon, m.color, onClick = { a.module(m.id) })
                 },
             )
         }
@@ -183,14 +183,11 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
                     Icons.Outlined.Key, MibotTokens.Brick, onClick = a.vault, showDivider = true)
                 MibotRow(t("应用连接中心", "Connected apps"),
                     t("连接 GitHub、邮件与 AI 服务", "Connect GitHub, mail and AI services"),
-                    Icons.Outlined.Extension, MibotTokens.Teal, onClick = a.connectedAccounts, showDivider = true,
-                    contentDescription = "Mibot Accounts Entry")
+                    Icons.Outlined.Extension, MibotTokens.Teal, onClick = a.connectedAccounts, showDivider = true)
                 MibotRow(t("微信", "WeChat"), t("通知消息 → 指令解析 → 本机任务队列", "Notifications → command parsing → local task queue"),
-                    Icons.Outlined.Email, MibotTokens.Green, onClick = a.wechat, showDivider = true,
-                    contentDescription = "Mibot WeChat Entry")
+                    Icons.Outlined.Email, MibotTokens.Green, onClick = a.wechat, showDivider = true)
                 MibotRow(t("钱包", "Wallet"), t("本地账本 · 支付通道尚未接入", "Local ledger · payment channel not connected"),
-                    Icons.Outlined.Storage, MibotTokens.Amber, onClick = a.wallet, showDivider = true,
-                    contentDescription = "Mibot Wallet Entry")
+                    Icons.Outlined.Storage, MibotTokens.Amber, onClick = a.wallet, showDivider = true)
                 MibotRow(t("服务商", "Providers"), t("${config.instances.size} 个 · API Key、一键登录、免费可用", "${config.instances.size} · API keys, 1-tap login, free tiers"),
                     Icons.Outlined.VpnKey, MibotTokens.Sky, onClick = a.providers, showDivider = true)
                 MibotRow(t("AI 网关", "AI gateway"), t("账号池、故障切换、冷却与健康检查", "Account pools, failover, cooldown, health checks"),

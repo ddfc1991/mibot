@@ -14,7 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.openminis.app.deeplink.DeepLinkAction
@@ -276,6 +278,11 @@ fun AppNavigation(
     initialDeepLink: DeepLinkAction? = null,
 ) {
     val context = LocalContext.current
+    val voicePrefs = remember(context) { context.getSharedPreferences("mikova_voice", android.content.Context.MODE_PRIVATE) }
+    var voicePreference by remember(voicePrefs) {
+        mutableStateOf(runCatching { com.openminis.app.mikova.voice.VoiceEngineId.valueOf(voicePrefs.getString("engine", "SHERPA") ?: "SHERPA") }
+            .getOrDefault(com.openminis.app.mikova.voice.VoiceEngineId.SHERPA))
+    }
 
     // T219-5: use the application-scoped singleton from MinisApp so UI
     // add/remove shares state with PRootKernel and the lifecycle re-probe
