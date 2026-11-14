@@ -86,7 +86,10 @@ object WeChatBridgeService {
         if (!allowed) return null
         val queue = TaskRunQueue.get(context.applicationContext)
         val reply = WeChatReplyRouter.route(WECHAT_PACKAGE, text, queue)
-        if (reply != null) log("↩ $reply")
+        if (reply != null) {
+            com.openminis.app.mibot.queue.TaskExecutionCoordinator.signal()
+            log("↩ $reply")
+        }
         return reply
     }
 

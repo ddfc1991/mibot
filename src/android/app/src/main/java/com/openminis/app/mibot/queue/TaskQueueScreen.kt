@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,8 +67,8 @@ private fun matches(filter: QueueFilter, job: AgentJob): Boolean = when (filter)
 private fun matches(filter: QueueFilter, run: TaskRun): Boolean = when (filter) {
     QueueFilter.ALL -> true
     // Queue metadata is not proof that an executor is alive.
-    QueueFilter.ACTIVE -> false
-    QueueFilter.WAITING -> run.state in setOf(TaskRunState.QUEUED, TaskRunState.HELD, TaskRunState.RUNNING)
+    QueueFilter.ACTIVE -> run.state == TaskRunState.RUNNING
+    QueueFilter.WAITING -> run.state in setOf(TaskRunState.QUEUED, TaskRunState.HELD)
     QueueFilter.DONE -> run.state == TaskRunState.DONE
 }
 
@@ -89,6 +90,8 @@ fun TaskQueueScreen(
     val filter = QueueFilter.valueOf(filterName)
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     var stopId by remember { mutableStateOf<String?>(null) }
+    var showNewTask by rememberSaveable { mutableStateOf(false) }
+    var newGoal by rememberSaveable { mutableStateOf("") }
     val jobList = jobs.values.sortedByDescending { it.createdAtMs }
     val shownJobs = jobList.filter { matches(filter, it) }
     val shownRuns = runs.filter { matches(filter, it) }.sortedByDescending { it.createdAt }
@@ -101,7 +104,7 @@ fun TaskQueueScreen(
         ) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MibotButton(t("新建任务", "New task"), onNewTask,
+                    MibotButton(t("新建任务", "New task"), { showNewTask = true },
                         Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Mibot New Task" })
                     MibotButton(t("定时任务", "Scheduled"), onScheduled,
                         Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Mibot Scheduled Tasks" }, tonal = true)
@@ -189,19 +192,27 @@ fun TaskQueueScreen(
                         StatusChip(when (run.state) {
                             TaskRunState.QUEUED -> t("已排队", "Queued")
                             TaskRunState.HELD -> t("已暂存", "Held")
-                            TaskRunState.RUNNING -> t("待核实", "Unverified")
+                            TaskRunState.RUNNING -> t("运行中", "Running")
                             TaskRunState.DONE -> t("已完成记录", "Recorded done")
                             TaskRunState.FAILED -> t("未完成", "Incomplete")
                         }, ChipKind.NEUTRAL)
                     }
                     Text(dateFormat.format(Date(run.createdAt)), fontSize = MibotType.Caption,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    run.resultText?.takeIf { it.isNotBlank() }?.let {
+                        Text(it.take(280), maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            fontSize = MibotType.Caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    run.error?.takeIf { it.isNotBlank() }?.let {
+                        Text(it.take(280), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            fontSize = MibotType.Caption, color = MaterialTheme.colorScheme.error)
+                    }
                     if (expanded == key) {
                         Spacer(Modifier.height(12.dp))
                         Text(run.goal, fontSize = MibotType.Body, lineHeight = MibotType.BodyLine,
                             color = MaterialTheme.colorScheme.onSurface)
-                        Text(t("本地状态不代表执行器仍在运行。继续会复制目标并打开新对话，请手动粘贴发送。",
-                            "A saved state does not prove an executor is running. Continue copies the goal and opens a new chat; paste and send it there."),
+                        Text(t("队列任务会交给现有 Agent 执行器；历史记录若没有会话，只能复制目标重新发送。",
+                            "Queued goals go through the existing Agent executor; a legacy record without a session can only be copied and sent again."),
                             modifier = Modifier.padding(top = 8.dp), fontSize = MibotType.Secondary,
                             lineHeight = MibotType.SecondaryLine, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = {
@@ -222,6 +233,41 @@ fun TaskQueueScreen(
                     fontSize = MibotType.Footnote, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+    if (showNewTask) {
+        AlertDialog(
+            onDismissRequest = { showNewTask = false },
+            title = { Text(t("新建任务", "New task")) },
+            text = {
+                OutlinedTextField(
+                    value = newGoal,
+                    onValueChange = { newGoal = it },
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Mikova Goal Input" },
+                    label = { Text(t("目标", "Goal")) },
+                    placeholder = { Text(t("例如：整理本周会议并给出下一步", "e.g. summarize this week's meetings and list next steps")) },
+                    minLines = 3,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val goal = newGoal.trim()
+                        if (goal.isNotEmpty()) {
+                            val run = queue.enqueue(goal, TaskKind.CHAT)
+                            TaskExecutionCoordinator.signal()
+                            newGoal = ""
+                            showNewTask = false
+                            Toast.makeText(context, tc(context, "已提交给 Agent", "Submitted to Agent"), Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = newGoal.trim().isNotEmpty(),
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Mikova Submit Goal" },
+                ) { Text(t("执行", "Run")) }
+            },
+            dismissButton = { TextButton(onClick = { showNewTask = false }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(t("取消", "Cancel"))
+            } },
+        )
     }
     stopId?.let { id ->
         val job = jobs[id]

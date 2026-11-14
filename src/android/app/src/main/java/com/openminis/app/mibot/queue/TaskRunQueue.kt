@@ -31,6 +31,9 @@ data class TaskRun(
     val state: TaskRunState = TaskRunState.QUEUED,
     val breakpoint: Int? = null,       // AgentLoop.interruptedStep 断点
     val runId: String? = null,         // AgentLoop runId（恢复用）
+    val sessionId: String? = null,     // ChatViewModel session executing this goal
+    val resultText: String? = null,    // bounded final response for the task page
+    val error: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val startedAt: Long? = null,
     val doneAt: Long? = null,
@@ -47,7 +50,18 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
 
     init { _runs.value = load() }
 
+    fun get(runId: String): TaskRun? = _runs.value.firstOrNull { it.id == runId }
+
     fun current(): TaskRun? = _runs.value.firstOrNull { it.state == TaskRunState.RUNNING }
+
+    /** Process death cannot preserve an in-flight coroutine; make it runnable again. */
+    @Synchronized
+    fun requeueInterrupted(): Int {
+        val stale = _runs.value.count { it.state == TaskRunState.RUNNING }
+        if (stale == 0) return 0
+        commit(_runs.value.map { if (it.state == TaskRunState.RUNNING) it.copy(state = TaskRunState.QUEUED) else it })
+        return stale
+    }
 
     fun queue(): List<TaskRun> = _runs.value.filter { it.state in setOf(TaskRunState.QUEUED, TaskRunState.HELD) }
 
@@ -93,11 +107,27 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
         return run.copy(state = TaskRunState.RUNNING)
     }
 
+    /** Attach the real ChatViewModel session created for this queued goal. */
+    @Synchronized
+    fun attachSession(runId: String, sessionId: String): TaskRun? {
+        val run = _runs.value.firstOrNull { it.id == runId } ?: return null
+        val list = _runs.value.map { if (it.id == runId) it.copy(sessionId = sessionId) else it }
+        commit(list)
+        return run.copy(sessionId = sessionId)
+    }
+
     /** 做完/失败：标终态，返回下一个可执行的（自动取下一个）。 */
     @Synchronized
-    fun complete(runId: String, failed: Boolean = false): TaskRun? {
+    fun complete(runId: String, failed: Boolean = false, resultText: String? = null, error: String? = null): TaskRun? {
         val fin = if (failed) TaskRunState.FAILED else TaskRunState.DONE
-        val list = _runs.value.map { if (it.id == runId) it.copy(state = fin, doneAt = System.currentTimeMillis()) else it }
+        val list = _runs.value.map {
+            if (it.id == runId) it.copy(
+                state = fin,
+                doneAt = System.currentTimeMillis(),
+                resultText = resultText?.takeLast(8_000),
+                error = error?.takeLast(1_000),
+            ) else it
+        }
         commit(list)
         return startNext()
     }
@@ -109,8 +139,10 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
      */
     @Synchronized
     fun cancel(runId: String): TaskRun? {
-        val list = _runs.value.map { if (it.id == runId && it.state != TaskRunState.DONE && it.state != TaskRunState.FAILED) it.copy(state = TaskRunState.FAILED, doneAt = System.currentTimeMillis()) else it }
-        commit(list)
+        val old = _runs.value.firstOrNull { it.id == runId } ?: return null
+        if (old.state == TaskRunState.DONE || old.state == TaskRunState.FAILED) return old
+        val cancelled = old.copy(state = TaskRunState.FAILED, error = "Cancelled by user", doneAt = System.currentTimeMillis())
+        commit(_runs.value.map { if (it.id == runId) cancelled else it })
         return startNext()
     }
 
@@ -160,6 +192,8 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
                 put("id", r.id); put("goal", r.goal); put("kind", r.kind.name)
                 put("priority", r.priority); put("state", r.state.name)
                 put("breakpoint", r.breakpoint ?: JSONObject.NULL); put("runId", r.runId ?: JSONObject.NULL)
+                put("sessionId", r.sessionId ?: JSONObject.NULL)
+                put("resultText", r.resultText ?: JSONObject.NULL); put("error", r.error ?: JSONObject.NULL)
                 put("createdAt", r.createdAt); put("startedAt", r.startedAt ?: JSONObject.NULL); put("doneAt", r.doneAt ?: JSONObject.NULL)
             })
         }
@@ -179,6 +213,9 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
                     state = runCatching { TaskRunState.valueOf(o.getString("state")) }.getOrDefault(TaskRunState.QUEUED),
                     breakpoint = if (o.isNull("breakpoint")) null else o.getInt("breakpoint"),
                     runId = if (o.isNull("runId")) null else o.getString("runId"),
+                    sessionId = if (o.isNull("sessionId")) null else o.getString("sessionId"),
+                    resultText = if (o.isNull("resultText")) null else o.getString("resultText"),
+                    error = if (o.isNull("error")) null else o.getString("error"),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                     startedAt = if (o.isNull("startedAt")) null else o.getLong("startedAt"),
                     doneAt = if (o.isNull("doneAt")) null else o.getLong("doneAt"),

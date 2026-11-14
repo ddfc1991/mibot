@@ -657,6 +657,7 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost, com.mibo
         // constructor arguments. Setting it early keeps a failure in a
         // late, non-UI subsystem from permanently locking the user out
         // of an app whose UI dependencies are in fact ready.
+        com.openminis.app.mibot.queue.TaskExecutionCoordinator.start(this, mikovaBridgeScope)
         com.openminis.app.mikova.wechat.WeChatBridgeService.start(this, mikovaBridgeScope)
         subsystemsInitialized = true
         // [T-update-channels] Automatic update checks on each return to the
