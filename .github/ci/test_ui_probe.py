@@ -87,6 +87,18 @@ class UiProbeTest(unittest.TestCase):
         with self.assertRaisesRegex(ProbeError, 'draft not retained'):
             screen.check(draft=('Mikova Voice TTS Input', 'MikovaDraft42'))
 
+    def test_draft_semantics_child_reads_only_owning_edit_text(self):
+        screen = self.screen('''<node class="android.widget.EditText" text="MikovaDraft42" bounds="[79,1225][1001,1415]">
+          <node content-desc="Mikova Voice Transcript" text="" bounds="[79,1225][1001,1415]"/>
+        </node><node class="android.widget.EditText" text="" bounds="[79,1768][1001,1958]">
+          <node content-desc="Mikova Voice TTS Input" bounds="[79,1768][1001,1958]"/>
+        </node>''')
+        screen.check(draft=('Mikova Voice Transcript', 'MikovaDraft42'))
+        with self.assertRaisesRegex(ProbeError, 'draft not retained'):
+            screen.check(draft=('Mikova Voice TTS Input', 'MikovaDraft42'))
+        with self.assertRaisesRegex(ProbeError, 'draft not retained'):
+            screen.check(draft=('Mikova Voice Transcript', 'wrong value'))
+
     def test_malformed_and_empty_xml_fail(self):
         for xml in ['not xml', '<hierarchy/>']:
             with self.assertRaises(ProbeError):

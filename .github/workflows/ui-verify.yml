@@ -10,8 +10,8 @@ concurrency:
   group: mikova-ui-verify-${{ github.ref }}
   cancel-in-progress: true
 env:
-  APK_RUN: '43626502203'
-  APK_COMMIT: '7ebcadf5245fb0ae04ffa71447a593dbb89d4c2d'
+  APK_RUN: '43631242000'
+  APK_COMMIT: '2173309cbfc859617708efc6ec8130113cd9b495'
 jobs:
   verify:
     name: Existing APK UI (API ${{ matrix.api }})

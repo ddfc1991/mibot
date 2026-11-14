@@ -123,9 +123,20 @@ class Screen:
                 raise ProbeError('expanded guide has no new visible explanatory content')
         if draft:
             label, expected = draft
-            node = self.lookup("desc", label)
-            if node is None or not any(n.get("text") == expected for n in node.iter("node")):
-                raise ProbeError(f"draft not retained in {label}")
+            node = self.lookup('desc', label)
+            if node is None:
+                raise ProbeError(f'draft not retained in {label}')
+            # Compose puts contentDescription on a child of the actual EditText.
+            # Read only the nearest owning editor, never another field on the page.
+            editor = node
+            while editor is not None and editor.get('class') != 'android.widget.EditText':
+                editor = self.parents.get(editor)
+            if editor is not None:
+                retained = self.visible(editor) and editor.get('text') == expected
+            else:
+                retained = any(n.get('text') == expected for n in node.iter('node'))
+            if not retained:
+                raise ProbeError(f'draft not retained in {label}')
 
 
 def adb(*args):
