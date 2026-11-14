@@ -123,6 +123,7 @@ modules() {
     if [ "$tab" = Settings ]; then
       adb shell input tap 946 2170 || abort "Settings tab tap failed before $file"
       sleep 1
+      probe top || abort "Settings list did not return before $file"
       probe check --text Settings --desc 'Mikova Accounts Entry' || abort "Settings glass shell did not return before $file"
     else
       tap desc "$tab" || abort "Settings tab unavailable before $file"
