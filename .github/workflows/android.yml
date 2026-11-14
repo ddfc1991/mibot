@@ -137,7 +137,7 @@ jobs:
 
       - name: Run Android unit tests
         working-directory: src/android
-        run: ./gradlew --no-daemon :app:testGithubDebugUnitTest -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
+        run: ./gradlew --no-daemon :app:testGithubDebugUnitTest -Dorg.gradle.jvmargs="-Xmx6g -Dfile.encoding=UTF-8"
 
       - name: assembleDebug
         working-directory: src/android
