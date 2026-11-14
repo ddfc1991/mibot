@@ -53,6 +53,8 @@ import dev.chrisbanes.haze.rememberHazeState
 enum class FrostLevel {
     /** Cards, list rows, inputs, chips: the default. */
     Card,
+    /** Content-bearing feed cards over a user photo; prevents backdrop text bleeding into copy. */
+    Content,
     /** Floating bars (tab bar, top-bar buttons). Same scrim, stronger blur. */
     Bar,
     /** Sheets / drawers / overlays holding long text: a little denser. */
@@ -81,6 +83,7 @@ object FrostTokens {
     fun scrimAlpha(dark: Boolean, level: FrostLevel, photo: Boolean = false): Float {
         var a = when (level) {
             FrostLevel.Card, FrostLevel.Bar -> if (dark) 0.62f else 0.72f
+            FrostLevel.Content -> if (dark) 0.88f else 0.92f
             FrostLevel.Sheet -> if (dark) 0.72f else 0.80f
         }
         // A photo can put white (dark theme) or black (light theme) right under
@@ -93,11 +96,13 @@ object FrostTokens {
     fun fallbackAlpha(level: FrostLevel, photo: Boolean = false): Float = when {
         photo -> 0.93f
         level == FrostLevel.Sheet -> 0.94f
+        level == FrostLevel.Content -> 0.97f
         else -> 0.88f
     }
 
     fun blurRadius(level: FrostLevel): Dp = when (level) {
         FrostLevel.Card -> 24.dp
+        FrostLevel.Content -> 28.dp
         FrostLevel.Bar -> 28.dp
         FrostLevel.Sheet -> 32.dp
     }

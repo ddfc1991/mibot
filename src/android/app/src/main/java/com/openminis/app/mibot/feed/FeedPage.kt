@@ -44,6 +44,7 @@ import com.openminis.app.mibot.design.Glyph
 import com.openminis.app.mibot.design.LineGlyph
 import com.openminis.app.mibot.design.LineIcons
 import com.openminis.app.mibot.design.MibotCard
+import com.openminis.app.ui.glass.FrostLevel
 import com.openminis.app.mibot.design.MibotPageTitle
 import com.openminis.app.mibot.design.MibotTokens
 import com.openminis.app.mibot.design.MibotType
@@ -161,7 +162,7 @@ private fun dayGroups(entries: List<FeedEntry>): List<Pair<String, List<FeedEntr
 
 @Composable
 private fun FeedEmpty() {
-    MibotCard(Modifier.padding(top = 4.dp)) {
+    MibotCard(Modifier.padding(top = 4.dp), frostLevel = FrostLevel.Content) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -221,7 +222,7 @@ private fun FeedCard(
     val s = kindStyle(e.kind)
     var expanded by rememberSaveable(e.id) { mutableStateOf(false) }
     val tint = MibotTokens.iconTint()
-    MibotCard(onClick = onOpen, padding = PaddingValues(14.dp)) {
+    MibotCard(onClick = onOpen, padding = PaddingValues(14.dp), frostLevel = FrostLevel.Content) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             KindDot(s, 30)
             Spacer(Modifier.width(10.dp))

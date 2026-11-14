@@ -8,6 +8,7 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +40,21 @@ class MikovaDisplayManager(private val context: Context) {
     private val _screens = mutableStateOf<List<VdScreen>>(emptyList())
     /** 当前所有虚拟屏(Compose 用 [State] 读,非 Compose 用 [screensFlow])。 */
     val screens: State<List<VdScreen>> = _screens
+
+    private val _visibleIslands = mutableStateOf<Set<Int>>(emptySet())
+    /** 当前显式打开的逐屏流云体。 */
+    val visibleIslands: State<Set<Int>> = _visibleIslands
+    private val _islandFeedback = mutableStateOf<Map<Int, String>>(emptyMap())
+    /** 逐屏显示窗与触控投递结果,用于让权限/WindowManager/注入失败可见。 */
+    val islandFeedback: State<Map<Int, String>> = _islandFeedback
+    private val islands = mutableMapOf<Int, VdIsland>()
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) {
+            if (_screens.value.any { it.displayId == displayId }) close(displayId)
+        }
+    }.also { displayManager.registerDisplayListener(it, Handler(Looper.getMainLooper())) }
 
     private val counter = AtomicInteger(0)
     private var shellBinding: ShellBinding? = null
@@ -96,6 +112,7 @@ class MikovaDisplayManager(private val context: Context) {
     @Synchronized
     fun close(displayId: Int) {
         val target = _screens.value.firstOrNull { it.displayId == displayId } ?: return
+        hideIsland(displayId)
         runCatching { target.release() }
         _screens.value = _screens.value.filterNot { it.displayId == displayId }
     }
@@ -103,10 +120,46 @@ class MikovaDisplayManager(private val context: Context) {
     /** 全部关掉 + 解绑 shell 连接。 */
     @Synchronized
     fun closeAll() {
+        islands.keys.toList().forEach(::hideIsland)
         _screens.value.forEach { runCatching { it.release() } }
         _screens.value = emptyList()
         shellBinding?.let { runCatching { it.unbind() } }
         shellBinding = null
+    }
+
+    /** 仅在用户逐屏显式操作后显示;权限或系统窗口失败以可见错误返回。 */
+    @Synchronized
+    fun showIsland(displayId: Int, controller: MikovaVdController): String? {
+        val screen = _screens.value.firstOrNull { it.displayId == displayId }
+            ?: return "虚拟屏 d$displayId 已关闭"
+        val island = islands.getOrPut(displayId) {
+            VdIsland(
+                context = app,
+                screen = screen,
+                controller = controller,
+                onVisibilityChanged = { visible ->
+                    _visibleIslands.value = if (visible) {
+                        _visibleIslands.value + displayId
+                    } else {
+                        _visibleIslands.value - displayId
+                    }
+                },
+                onFeedback = { text ->
+                    _islandFeedback.value = _islandFeedback.value + (displayId to text)
+                },
+                onDismiss = { hideIsland(displayId) },
+            )
+        }
+        val error = island.show()
+        if (error != null) _islandFeedback.value = _islandFeedback.value + (displayId to error)
+        return error
+    }
+
+    /** 隐藏单屏窗，不停止也不释放虚拟屏或其任务。 */
+    @Synchronized
+    fun hideIsland(displayId: Int) {
+        islands.remove(displayId)?.hide()
+        _visibleIslands.value = _visibleIslands.value - displayId
     }
 
     /** shell 是否可用(助手已配对、[IMikaShell] 连上)。决定建屏走哪条后端。 */

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +36,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.DisposableEffect
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.openminis.app.mibot.design.ChipKind
@@ -72,7 +80,12 @@ fun VdPoolScreen(
     val scope = rememberCoroutineScope()
     val bottom = LocalGlassBottomInset.current
     val screens by manager.screens
+    val visibleIslands by manager.visibleIslands
+    val islandFeedback by manager.islandFeedback
     val maxScreens = remember { manager.maxScreens() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var overlayPermissionGranted by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
+    var pendingIslandId by remember { mutableStateOf<Int?>(null) }
     var focusedId by remember { mutableStateOf<Int?>(null) }
     var newTaskName by remember { mutableStateOf("") }
     var launchPackage by remember { mutableStateOf("") }
@@ -82,6 +95,27 @@ fun VdPoolScreen(
     LaunchedEffect(screens) {
         if (focusedId != null && screens.none { it.displayId == focusedId }) focusedId = null
         if (focusedId == null) focusedId = screens.firstOrNull()?.displayId
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                overlayPermissionGranted = Settings.canDrawOverlays(ctx)
+                val requestedId = pendingIslandId
+                if (overlayPermissionGranted && requestedId != null) {
+                    pendingIslandId = null
+                    manager.showIsland(requestedId, controller)?.let { message = it }
+                } else if (!overlayPermissionGranted && requestedId != null) {
+                    pendingIslandId = null
+                    message = "未授予悬浮窗权限；虚拟屏任务仍在运行"
+                }
+                if (!overlayPermissionGranted && manager.visibleIslands.value.isNotEmpty()) {
+                    manager.visibleIslands.value.toList().forEach(manager::hideIsland)
+                    message = "悬浮窗权限已关闭，流云体已隐藏；虚拟屏任务仍继续"
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     MibotScaffold(title = "虚拟屏多开", onBack = onBack) {
@@ -202,6 +236,23 @@ fun VdPoolScreen(
                 screen = screen,
                 focused = screen.displayId == focusedId,
                 onFocus = { focusedId = screen.displayId },
+                islandVisible = screen.displayId in visibleIslands,
+                islandFeedback = islandFeedback[screen.displayId],
+                onToggleIsland = {
+                    if (screen.displayId in visibleIslands) {
+                        manager.hideIsland(screen.displayId)
+                    } else if (!Settings.canDrawOverlays(ctx)) {
+                        pendingIslandId = screen.displayId
+                        runCatching {
+                            ctx.startActivity(
+                                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }.onFailure { message = "无法打开悬浮窗权限设置：${it.message}" }
+                    } else {
+                        manager.showIsland(screen.displayId, controller)?.let { message = it }
+                    }
+                },
                 onClose = {
                     manager.close(screen.displayId)
                     message = "已关闭 d${screen.displayId}"
@@ -243,7 +294,10 @@ fun VdPoolScreen(
 private fun VdScreenCard(
     screen: VdScreen,
     focused: Boolean,
+    islandVisible: Boolean,
+    islandFeedback: String?,
     onFocus: () -> Unit,
+    onToggleIsland: () -> Unit,
     onClose: () -> Unit,
 ) {
     val frame by screen.frames.collectAsState()
@@ -297,6 +351,22 @@ private fun VdScreenCard(
                     StatusChip(
                         text = if (frame != null) "有画面" else "等待画面",
                         kind = if (frame != null) ChipKind.OK else ChipKind.WARN,
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                MibotButton(
+                    text = if (islandVisible) "收起浮窗" else "流云体",
+                    onClick = onToggleIsland,
+                    tonal = !islandVisible,
+                    compact = true,
+                )
+                islandFeedback?.let {
+                    Text(
+                        text = it,
+                        modifier = Modifier.widthIn(max = 112.dp).padding(top = 4.dp),
+                        fontSize = MibotType.Footnote,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }

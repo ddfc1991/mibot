@@ -296,13 +296,14 @@ fun MibotCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     padding: PaddingValues = PaddingValues(0.dp),
+    frostLevel: FrostLevel = FrostLevel.Card,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier
             .fillMaxWidth()
             .padding(horizontal = MibotTokens.ScreenPadding)
-            .frosted(MibotTokens.CardShape, elevation = 1.dp)
+            .frosted(MibotTokens.CardShape, level = frostLevel, elevation = 1.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(padding),
         content = content,
