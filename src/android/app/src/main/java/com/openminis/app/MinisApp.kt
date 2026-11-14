@@ -276,6 +276,11 @@ class MinisApp : Application(), ImageLoaderFactory, WebOwner, MikaHost, com.mibo
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
+        // Mika services read tr() before their first Activity. Install the host's
+        // localized resources before any phone/task singleton can be created.
+        com.mibot.i18n.UiText.source = com.mibot.i18n.ResourceTexts {
+            com.openminis.app.i18n.LocaleWrap.wrap(this).resources
+        }
         // T283: install ACRA before any app-level singleton runs so a crash
         // anywhere from onCreate forward is captured. CrashFileSender
         // (registered via META-INF/services/org.acra.sender.ReportSenderFactory)

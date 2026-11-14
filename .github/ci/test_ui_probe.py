@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from ui_probe import ProbeError, Screen, locate, scroll_top
+from ui_probe import ProbeError, Screen, locate, scroll_top, capture
 
 
 class UiProbeTest(unittest.TestCase):
@@ -33,6 +33,16 @@ class UiProbeTest(unittest.TestCase):
           </node>
         </node>''')
         self.assertEqual(screen.lookup('desc', 'Below fold', True), (540, 1750))
+
+    def test_capture_retries_only_dump_and_never_repeats_an_input(self):
+        with patch('ui_probe.adb', side_effect=[ProbeError('timeout'), b'', b'<hierarchy/>']) as command, patch('ui_probe.time.sleep'):
+            self.assertEqual(capture(), b'<hierarchy/>')
+            self.assertEqual(command.call_count, 3)
+            self.assertTrue(all('input' not in call.args for call in command.call_args_list))
+        with patch('ui_probe.adb', side_effect=ProbeError('timeout')) as command, patch('ui_probe.time.sleep'):
+            with self.assertRaises(ProbeError):
+                capture()
+            self.assertEqual(command.call_count, 2)
 
     def test_invalid_targets_never_tap(self):
         for attrs in ['enabled="false" bounds="[0,0][100,100]"',

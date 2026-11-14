@@ -189,6 +189,10 @@ jobs:
 
       - name: Run emulator + smoke script
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # Require every native page, real Back, voice draft and both Chinese themes.
+          # Obsolete helpers/network catalogs remain separate diagnostics in smoke.sh.
+          MIKOVA_CORE_UI_ONLY: '1'
         with:
           api-level: ${{ matrix.api }}
           target: google_apis

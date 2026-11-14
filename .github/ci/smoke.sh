@@ -13,7 +13,7 @@ finish() {
   local result=$?
   trap - EXIT
   adb logcat -d -v time > "$OUT/logcat.txt" 2>&1 || true
-  grep -E "FATAL EXCEPTION" -A30 "$OUT/logcat.txt" | head -120 > "$OUT/crash.txt" || true
+  grep -E "FATAL EXCEPTION|ACRA.*ACRA caught.*for ${PKG:-com.mikova.app}" -A65 "$OUT/logcat.txt" | head -200 > "$OUT/crash.txt" || true
   if [ -s "$OUT/crash.txt" ]; then
     echo "::error::crash in logcat"; cat "$OUT/crash.txt"; result=1
   fi
