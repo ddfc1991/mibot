@@ -43,9 +43,44 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
     private val ttsInit = kotlinx.coroutines.CompletableDeferred<Boolean>()
     private var capturing = false
     private var playback: AudioTrack? = null
+    private val playbackEpoch = java.util.concurrent.atomic.AtomicInteger(0)
+    private val isSpeaking = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private val playbackLevel = kotlinx.coroutines.flow.MutableStateFlow(0f)
+    override val speaking: kotlinx.coroutines.flow.StateFlow<Boolean> get() = isSpeaking
+    override val outputLevel: kotlinx.coroutines.flow.StateFlow<Float> get() = playbackLevel
 
     override val isAvailable: Boolean
         get() = SpeechRecognizer.isRecognitionAvailable(appContext)
+
+    override fun ttsVoices(context: Context): List<TtsVoiceChoice> {
+        ensureVoiceEngine()
+        val engine = tts
+        return runCatching {
+            engine?.voices.orEmpty().filter { it.locale.language == "zh" }
+                .sortedWith(compareBy<android.speech.tts.Voice> { it.isNetworkConnectionRequired }.thenBy { it.name })
+                .map { voice ->
+                    TtsVoiceChoice(
+                        id = "system:${voice.name}",
+                        label = voice.name.substringAfterLast('-').replace('_', ' '),
+                        detail = listOf(voice.locale.toLanguageTag(), if (voice.isNetworkConnectionRequired) "Online" else "On-device").joinToString(" · "),
+                        online = voice.isNetworkConnectionRequired,
+                    )
+                }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun ensureVoiceEngine(): TextToSpeech? = synchronized(this) {
+        tts ?: TextToSpeech(appContext) { status ->
+            ttsReady.set(status == TextToSpeech.SUCCESS)
+            if (!ttsInit.isCompleted) ttsInit.complete(status == TextToSpeech.SUCCESS)
+        }.also { tts = it }
+    }
+
+    override fun setTtsVoice(context: Context, voiceId: String?) {
+        val target = tts ?: return
+        val name = voiceId?.removePrefix("system:") ?: return
+        target.voices.orEmpty().firstOrNull { it.name == name && it.locale.language == "zh" }?.let(target::setVoice)
+    }
 
     @android.annotation.SuppressLint("MissingPermission")
     override fun startListen(locale: VoiceEngine.LocaleCompat, listener: VoiceEngine.Listener) {
@@ -106,8 +141,9 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
     /** 平台引擎没有"喂文件"的公开接口:明确不支持。 */
     override suspend fun transcribeFile(wavPath: String): String? = null
 
-    override suspend fun synthesize(text: String, play: Boolean): ByteArray? = withContext(Dispatchers.IO) {
+    override suspend fun synthesize(text: String, play: Boolean, voiceId: String?): ByteArray? = withContext(Dispatchers.IO) {
         val engine = ensureTts() ?: return@withContext null
+        if (voiceId != null) setTtsVoice(appContext, voiceId)
         val out = File(appContext.cacheDir, "tts_${UUID.randomUUID()}.wav")
         out.delete()
         val bytes = suspendCancellableCoroutine { cont ->
@@ -163,13 +199,34 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
         )
         track.write(pcm, 0, pcm.size)
         playback = track
+        val epoch = playbackEpoch.incrementAndGet()
+        isSpeaking.value = true
         track.play()
+        Thread({
+            while (playbackEpoch.get() == epoch && track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                val sample = (track.playbackHeadPosition.toLong() * 2).toInt().coerceIn(0, (pcm.size - 1).coerceAtLeast(0))
+                val end = (sample + 1000).coerceAtMost(pcm.size - 1)
+                var peak = 0
+                for (i in sample..end step 2) peak = maxOf(peak, kotlin.math.abs(((pcm[i].toInt() and 0xff) or (pcm[i + 1].toInt() shl 8)).toShort().toInt()))
+                playbackLevel.value = (peak / 32767f).coerceIn(0f, 1f)
+                try { Thread.sleep(32L) } catch (_: InterruptedException) { break }
+            }
+            if (playbackEpoch.get() == epoch) {
+                runCatching { track.stop() }; runCatching { track.release() }
+                playback = null; isSpeaking.value = false; playbackLevel.value = 0f
+            }
+        }, "mikova-platform-tts-level").start()
     }
 
     override fun stopSpeaking() {
+        playbackEpoch.incrementAndGet()
         runCatching { tts?.stop() }
         val t = playback
         playback = null
+        isSpeaking.value = false
+        playbackLevel.value = 0f
+        runCatching { t?.pause() }
+        runCatching { t?.flush() }
         runCatching { t?.stop() }
         runCatching { t?.release() }
     }

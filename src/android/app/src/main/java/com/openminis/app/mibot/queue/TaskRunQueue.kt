@@ -189,8 +189,13 @@ class TaskRunQueue(private val prefs: android.content.SharedPreferences) {
 
     companion object {
         private const val KEY = "task_run_queue"
-        fun get(context: Context): TaskRunQueue = TaskRunQueue(
-            context.getSharedPreferences("mibot_queue", Context.MODE_PRIVATE)
-        )
+        @Volatile private var instance: TaskRunQueue? = null
+
+        /** Share one flow with service callers; keep the existing scheduling semantics. */
+        fun get(context: Context): TaskRunQueue = instance ?: synchronized(this) {
+            instance ?: TaskRunQueue(
+                context.applicationContext.getSharedPreferences("mibot_queue", Context.MODE_PRIVATE)
+            ).also { instance = it }
+        }
     }
 }

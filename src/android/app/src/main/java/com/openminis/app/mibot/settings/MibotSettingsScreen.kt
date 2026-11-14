@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.PhonelinkSetup
@@ -91,6 +92,12 @@ class MibotSettingsActions(
     val mail: () -> Unit = {},
     val aiMail: () -> Unit = {},
     val capabilities: () -> Unit = {},
+    val connectedAccounts: () -> Unit,
+    val voice: () -> Unit,
+    val taskQueue: () -> Unit,
+    val wechat: () -> Unit,
+    val wallet: () -> Unit,
+    val selfHost: () -> Unit,
     // [fork/mibot-modules] 打开任意已注册模块（按 id），见 mibot/module/Module.kt.
     val module: (String) -> Unit = {},
 )
@@ -141,6 +148,8 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
             MibotGrid(
                 listOf(
                     MibotGridItem(t("账号台账", "Vault"), Icons.Outlined.Key, MibotTokens.Brick, a.vault),
+                    MibotGridItem(t("应用接入", "Connected apps"), Icons.Outlined.Extension, MibotTokens.Teal, a.connectedAccounts,
+                        contentDescription = "Mibot Accounts Entry"),
                     MibotGridItem(t("AI 网关", "Gateway"), Icons.Outlined.Hub, MibotTokens.Slate, a.gateway),
                     MibotGridItem(t("沙箱", "Sandbox"), Icons.Outlined.ViewInAr, MibotTokens.Teal, a.sandbox),
                     MibotGridItem(t("终端", "Terminal"), Icons.Outlined.Terminal, MibotTokens.Navy, a.terminal),
@@ -151,9 +160,14 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
                     MibotGridItem(t("定时任务", "Scheduled"), Icons.Outlined.Schedule, MibotTokens.Sky, a.scheduled),
                     MibotGridItem("Bots", Icons.Outlined.SmartToy, MibotTokens.Taupe, a.bots),
                     MibotGridItem(t("人格", "Soul"), Icons.Outlined.Face, MibotTokens.Red, a.soul),
-                    MibotGridItem(t("后台操控", "BG control"), Icons.Outlined.PhonelinkSetup, MibotTokens.Brick, a.virtualDisplay),
+                    MibotGridItem(t("后台操控", "BG control"), Icons.Outlined.PhonelinkSetup, MibotTokens.Brick, a.virtualDisplay,
+                        contentDescription = "Mikova Virtual Display Entry"),
                     MibotGridItem(t("插件市场", "Plugins"), Icons.Outlined.Storefront, MibotTokens.Amber, a.plugins),
                     MibotGridItem(t("诊断", "Diagnose"), Icons.Outlined.MonitorHeart, MibotTokens.Steel, a.diagnostics),
+                    MibotGridItem(t("任务队列", "Task queue"), Icons.Outlined.Schedule, MibotTokens.Sky, a.taskQueue,
+                        contentDescription = "Mibot Task Queue Entry"),
+                    MibotGridItem(t("语音", "Voice"), Icons.Outlined.Mic, MibotTokens.Green, a.voice,
+                        contentDescription = "Mibot Voice Entry"),
                 ) + ModuleRegistry.all().filter { it.showInGrid }.map { m ->
                     // [fork/mibot-modules] 只有显式 showInGrid=true 的模块才出现在应用网格；
                     // 其余（如 Mika 能力）只作能力提供者经 CapabilityBus 注入宿主功能，不单独露头.
@@ -167,6 +181,16 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
                 MibotRow(t("账号台账", "Account Vault"),
                     t("AI 服务、登录与密钥 · ${accounts.size} 个账号", "AI services, logins & keys · ${accounts.size} accounts"),
                     Icons.Outlined.Key, MibotTokens.Brick, onClick = a.vault, showDivider = true)
+                MibotRow(t("应用连接中心", "Connected apps"),
+                    t("连接 GitHub、邮件与 AI 服务", "Connect GitHub, mail and AI services"),
+                    Icons.Outlined.Extension, MibotTokens.Teal, onClick = a.connectedAccounts, showDivider = true,
+                    contentDescription = "Mibot Accounts Entry")
+                MibotRow(t("微信", "WeChat"), t("通知消息 → 指令解析 → 本机任务队列", "Notifications → command parsing → local task queue"),
+                    Icons.Outlined.Email, MibotTokens.Green, onClick = a.wechat, showDivider = true,
+                    contentDescription = "Mibot WeChat Entry")
+                MibotRow(t("钱包", "Wallet"), t("本地账本 · 支付通道尚未接入", "Local ledger · payment channel not connected"),
+                    Icons.Outlined.Storage, MibotTokens.Amber, onClick = a.wallet, showDivider = true,
+                    contentDescription = "Mibot Wallet Entry")
                 MibotRow(t("服务商", "Providers"), t("${config.instances.size} 个 · API Key、一键登录、免费可用", "${config.instances.size} · API keys, 1-tap login, free tiers"),
                     Icons.Outlined.VpnKey, MibotTokens.Sky, onClick = a.providers, showDivider = true)
                 MibotRow(t("AI 网关", "AI gateway"), t("账号池、故障切换、冷却与健康检查", "Account pools, failover, cooldown, health checks"),
@@ -205,6 +229,8 @@ fun MibotSettingsScreen(a: MibotSettingsActions) {
             MibotCard {
                 MibotRow(t("后台操控 / 虚拟屏", "Background control"), t("在隐藏虚拟屏操作 App，不占你的屏幕 · 无线调试 / Shizuku", "Operate apps on a hidden display · Wireless Debugging / Shizuku"),
                     Icons.Outlined.PhonelinkSetup, MibotTokens.Brick, onClick = a.virtualDisplay, showDivider = true)
+                MibotRow(t("自托管服务器", "Self-hosted server"), t("管理远程运行环境", "Manage remote runtime configuration"),
+                    Icons.Outlined.Lan, MibotTokens.Navy, onClick = a.selfHost, showDivider = true)
                 MibotRow(t("沙箱 / 运行环境", "Sandbox / runtime"), t("Alpine Linux · 终端、文件、DNS、重置", "Alpine Linux · terminal, files, DNS, reset"),
                     Icons.Outlined.ViewInAr, MibotTokens.Teal, onClick = a.sandbox, showDivider = true)
                 MibotRow(t("网络路由", "Network routing"), null, Icons.Outlined.Lan, MibotTokens.Sky, onClick = a.network, showDivider = true)

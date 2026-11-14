@@ -381,6 +381,19 @@ fun MibotRow(
                 .fillMaxWidth()
                 .heightIn(min = MibotSpace.RowMin)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .then(onClick?.let { callback ->
+                    val desc = when (title) {
+                        "应用连接中心", "应用接入", "Connected apps" -> "Mikova Accounts Entry"
+                        "任务队列", "Task queue" -> "Mikova Task Queue Entry"
+                        "语音", "Voice" -> "Mikova Voice Entry"
+                        "微信", "WeChat" -> "Mikova WeChat Entry"
+                        "钱包", "Wallet" -> "Mikova Wallet Entry"
+                        "自托管服务器", "Self-hosted server" -> "Mikova Self Host Entry"
+                        "后台操控 / 虚拟屏", "Background control" -> "Mikova Virtual Display Entry"
+                        else -> null
+                    }
+                    if (desc == null) Modifier else Modifier.semantics { contentDescription = desc }
+                } ?: Modifier)
                 .padding(horizontal = MibotSpace.M + 2.dp, vertical = MibotSpace.S),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -412,7 +425,13 @@ fun MibotRow(
     }
 }
 
-data class MibotGridItem(val label: String, val icon: ImageVector, val color: Color, val onClick: () -> Unit)
+data class MibotGridItem(
+    val label: String,
+    val icon: ImageVector,
+    val color: Color,
+    val onClick: () -> Unit,
+    val contentDescription: String? = null,
+)
 
 /** 4-column apps grid of coloured circular icons (reference "应用" panel). */
 @Composable
@@ -427,7 +446,7 @@ fun MibotGrid(items: List<MibotGridItem>, columns: Int = 4) {
                             .clip(MibotRadius.RowShape)
                             .clickable(onClick = item.onClick)
                             .padding(vertical = MibotSpace.S)
-                            .semantics { contentDescription = item.label },
+                            .semantics { contentDescription = item.contentDescription ?: item.label },
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         IconChip(item.icon, item.color, size = MibotIcon.GridChip, filled = true)

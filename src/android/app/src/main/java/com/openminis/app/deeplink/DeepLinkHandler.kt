@@ -167,16 +167,22 @@ object DeepLinkHandler {
         val arg = segments.getOrNull(1)?.takeIf { it.isNotBlank() }
 
         return when (head) {
-            // [destiny/v7] Native pages added by the full-spec drop. These are
-            // real Compose routes, so CI can deep-link straight to them.
-            "voice" -> DeepLinkAction.OpenSettingsScreen("destiny_voice")
+            // Preserve Mibot's navigation and open the implemented module screens.
+            "voice" -> DeepLinkAction.OpenSettingsScreen(Routes.MIBOT_VOICE)
+            "voice-settings", "voice_settings" -> DeepLinkAction.OpenSettingsScreen("mikova/voice-settings")
+            "connections", "app-access", "app_access" ->
+                DeepLinkAction.OpenSettingsScreen(com.openminis.app.mikova.accounts.AccountRoutes.CENTER)
+            "task-queue", "task_queue", "queue" -> DeepLinkAction.OpenSettingsScreen(Routes.MIBOT_TASK_QUEUE)
+            "wechat" -> DeepLinkAction.OpenSettingsScreen(Routes.MIBOT_WECHAT)
+            "wallet" -> DeepLinkAction.OpenSettingsScreen(Routes.MIBOT_WALLET)
+            "self-host", "selfhost" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mikova.selfhost.SelfHostRoutes.SCREEN)
             "all-screens", "all_screens", "spec" -> DeepLinkAction.OpenSettingsScreen("destiny_spec")
             "spec-screen" ->
                 if (arg != null) DeepLinkAction.OpenSettingsScreen("destiny_spec/$arg")
                 else DeepLinkAction.OpenSettingsScreen("destiny_spec")
             "servers" -> DeepLinkAction.OpenSettingsScreen("destiny_servers")
-            // [destiny/v7-full] The design-spec home + direct screen routes.
-            "home" -> DeepLinkAction.OpenSettingsScreen("destiny_v7_home")
+            // Home always means the original chat/list shell, not a design preview.
+            "home" -> DeepLinkAction.OpenSettingsScreen(Routes.SESSION_LIST)
             "v7-screen", "screen" ->
                 if (arg != null) DeepLinkAction.OpenSettingsScreen("destiny_v7_screen/$arg")
                 else DeepLinkAction.OpenSettingsScreen("destiny_v7_home")
@@ -244,8 +250,8 @@ object DeepLinkHandler {
             }
             "capabilities", "automation" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.settings.CapRoutes.PAGE)
             "sandbox" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.sandbox.SandboxRoutes.SANDBOX)
-            // [fork/mibot-merge] "virtual-display"/"vd"/"background-control" deep links
-            // retired with the mibot/phone stack; fall through to diagnostics.
+            // The backend changed to Mika; keep the user's existing entry points.
+            "virtual-display", "vd", "background-control" -> DeepLinkAction.OpenSettingsScreen("mikova_vd")
             "diagnostics" -> DeepLinkAction.OpenSettingsScreen(com.openminis.app.mibot.settings.DiagnosticsRoutes.DIAGNOSTICS)
             "about" -> DeepLinkAction.OpenSettingsScreen(Routes.ABOUT)
             "network" -> DeepLinkAction.OpenSettingsScreen(Routes.NETWORK)

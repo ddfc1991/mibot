@@ -38,6 +38,28 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
     override val displayName get() = "离线 sherpa-onnx"
     override val supportsPartialResults get() = true
 
+    private val ttsPrefs by lazy { appContext.getSharedPreferences("mikova_voice", Context.MODE_PRIVATE) }
+    @Volatile private var speakerId: Int = ttsPrefs.getInt("aishell3_speaker", 0).coerceIn(0, 173)
+
+    override fun ttsVoices(context: Context): List<TtsVoiceChoice> {
+        if (!VoiceModelManager.hasTtsModel(context.applicationContext)) return emptyList()
+        val count = runCatching {
+            val engine = tts ?: SherpaJni.buildOfflineTts(ttsConfig(context.applicationContext))?.also { tts = it }
+                ?: return@runCatching 0
+            (engine.javaClass.getMethod("numSpeakers").invoke(engine) as? Number)?.toInt() ?: 0
+        }.getOrDefault(0).coerceIn(0, 512)
+        return (0 until count).map { id ->
+            TtsVoiceChoice("aishell3:$id", "Speaker ${id + 1}", "AISHELL3 · 本地离线", online = false)
+        }
+    }
+
+    override fun setTtsVoice(context: Context, voiceId: String?) {
+        val count = ttsVoices(context.applicationContext).size.coerceAtLeast(1)
+        val id = voiceId?.substringAfterLast(':')?.toIntOrNull()?.coerceIn(0, count - 1) ?: 0
+        speakerId = id
+        ttsPrefs.edit().putInt("aishell3_speaker", id).apply()
+    }
+
     private val degradedFlag = AtomicBoolean(false)
     override val degraded get() = degradedFlag.get()
 
@@ -46,8 +68,15 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
     @Volatile private var stream: Any? = null     // OnlineRecognizerStream
     @Volatile private var tts: Any? = null        // OfflineTts
     @Volatile private var recorder: AudioRecord? = null
+    @Volatile private var captureStereo = false
     @Volatile private var capturing = false
     @Volatile private var playback: AudioTrack? = null
+
+    override val speaking: kotlinx.coroutines.flow.StateFlow<Boolean>? get() = isSpeaking
+    override val outputLevel: kotlinx.coroutines.flow.StateFlow<Float>? get() = ttsLevel
+    private val isSpeaking = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private val ttsLevel = kotlinx.coroutines.flow.MutableStateFlow(0f)
+    @Volatile private var playEpoch = 0L
 
     override val isAvailable: Boolean
         get() = nativeLoaded && VoiceModelManager.hasAsrModel(appContext)
@@ -86,44 +115,76 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
 
         capturing = true
         val sampleRate = 16_000
-        val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val stereoMask = AudioFormat.CHANNEL_IN_STEREO
+        val stereoBuffer = AudioRecord.getMinBufferSize(sampleRate, stereoMask, AudioFormat.ENCODING_PCM_16BIT)
+        val monoMask = AudioFormat.CHANNEL_IN_MONO
+        val monoBuffer = AudioRecord.getMinBufferSize(sampleRate, monoMask, AudioFormat.ENCODING_PCM_16BIT)
+        val canStereo = stereoBuffer > 0 && AudioRecord.getMinBufferSize(sampleRate, stereoMask, AudioFormat.ENCODING_PCM_16BIT) > 0
+        val channelMask = if (canStereo) stereoMask else monoMask
+        val minBuf = if (canStereo) stereoBuffer else monoBuffer
         if (minBuf <= 0) {
             capturing = false
             listener.onError(VoiceEngine.VoiceError.UNAVAILABLE, "无法打开麦克风缓冲")
             return
         }
-        val rec2 = try {
-            AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
-        } catch (t: Throwable) {
+        var selectedStereo = canStereo
+        var rec2 = runCatching {
+            AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+        }.getOrNull()?.takeIf { it.state == AudioRecord.STATE_INITIALIZED }
+        if (rec2 == null && selectedStereo) {
+            selectedStereo = false
+            val fallbackBuffer = monoBuffer.takeIf { it > 0 } ?: minBuf
+            rec2 = runCatching {
+                AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, monoMask, AudioFormat.ENCODING_PCM_16BIT, fallbackBuffer * 2)
+            }.getOrNull()?.takeIf { it.state == AudioRecord.STATE_INITIALIZED }
+        }
+        if (rec2 == null) {
             capturing = false
-            listener.onError(VoiceEngine.VoiceError.PERMISSION, t.message)
+            listener.onDirection(null)
+            listener.onError(VoiceEngine.VoiceError.PERMISSION, "无法初始化麦克风")
             return
         }
+        captureStereo = selectedStereo
+        listener.onDirection(if (selectedStereo) 0f else null)
         recorder = rec2
         rec2.startRecording()
 
         Thread({
-            captureLoop(rec2, sampleRate, listener)
+            captureLoop(rec2, sampleRate, selectedStereo, listener)
         }, "sherpa-asr").start()
     }
 
-    private fun captureLoop(rec: AudioRecord, sampleRate: Int, listener: VoiceEngine.Listener) {
-        val chunk = 1_600 // 100ms of 16k mono
-        val pcm = ShortArray(chunk)
-        val floats = FloatArray(chunk)
+    private fun captureLoop(rec: AudioRecord, sampleRate: Int, stereo: Boolean, listener: VoiceEngine.Listener) {
+        val frames = 1_600 // 100ms of 16k speech
+        val pcm = ShortArray(frames * if (stereo) 2 else 1)
+        val floats = FloatArray(frames)
         val st = stream ?: return
         while (capturing) {
-            val n = rec.read(pcm, 0, chunk)
+            val n = rec.read(pcm, 0, pcm.size)
             if (n <= 0) continue
+            val frameCount = if (stereo) n / 2 else n
+            if (frameCount <= 0) continue
             var sumSq = 0.0
-            for (i in 0 until n) {
-                val f = pcm[i] / 32768f
-                floats[i] = f
-                sumSq += f.toDouble() * f
+            var leftSq = 0.0
+            var rightSq = 0.0
+            for (i in 0 until frameCount) {
+                val left = pcm[if (stereo) i * 2 else i] / 32768f
+                val right = if (stereo) pcm[i * 2 + 1] / 32768f else left
+                val mono = (left + right) * 0.5f
+                floats[i] = mono
+                sumSq += mono.toDouble() * mono
+                leftSq += left.toDouble() * left
+                rightSq += right.toDouble() * right
             }
-            val rms = kotlin.math.sqrt(sumSq / n)
+            val rms = kotlin.math.sqrt(sumSq / frameCount)
             listener.onLevel((20.0 * kotlin.math.log10(maxOf(rms, 1e-6))).toFloat())
-            SherpaJni.acceptWaveform(st, floats.copyOf(n), sampleRate)
+            if (stereo) {
+                val l = kotlin.math.sqrt(leftSq / frameCount)
+                val r = kotlin.math.sqrt(rightSq / frameCount)
+                val pan = ((r - l) / (r + l + 1e-6)).toFloat().coerceIn(-1f, 1f)
+                listener.onDirection(pan)
+            }
+            SherpaJni.acceptWaveform(st, floats.copyOf(frameCount), sampleRate)
             val r = recognizer ?: break
             while (SherpaJni.isReady(r)) SherpaJni.decode(r)
             if (SherpaJni.isEndpoint(r)) {
@@ -188,10 +249,14 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
         text
     }
 
-    override suspend fun synthesize(text: String, play: Boolean): ByteArray? = withContext(Dispatchers.IO) {
+    override suspend fun synthesize(text: String, play: Boolean, voiceId: String?): ByteArray? = withContext(Dispatchers.IO) {
         if (!ensureNative() || !VoiceModelManager.hasTtsModel(appContext)) return@withContext null
         val engine = tts ?: SherpaJni.buildOfflineTts(ttsConfig(appContext))?.also { tts = it } ?: return@withContext null
-        val audio = SherpaJni.generate(engine, text) ?: return@withContext null
+        val requestedId = voiceId?.substringAfterLast(':')?.toIntOrNull()
+        val speakerCount = ttsVoices(appContext).size
+        if (speakerCount == 0) return@withContext null
+        val selectedSpeaker = (requestedId ?: speakerId).coerceIn(0, speakerCount - 1)
+        val audio = SherpaJni.generate(engine, text, selectedSpeaker) ?: return@withContext null
         val (samples, rate) = audio
         val wav = WavUtil.encode(samples, rate)
         if (play) playPcm(samples, rate)
@@ -201,6 +266,7 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
     private fun playPcm(samples: FloatArray, sampleRate: Int) {
         stopSpeaking()
         val bytes = WavUtil.pcmBytes(samples)
+        val epoch = ++playEpoch
         val track = AudioTrack(
             AudioManager.STREAM_MUSIC,
             sampleRate,
@@ -211,12 +277,40 @@ class SherpaVoiceEngine(private val appContext: Context) : VoiceEngine {
         )
         track.write(bytes, 0, bytes.size)
         playback = track
+        isSpeaking.value = true
         track.play()
+        Thread({
+            var lastPoll = 0L
+            while (epoch == playEpoch && track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                val head = track.playbackHeadPosition.toLong()
+                val sample = head.toInt().coerceIn(0, (samples.size - 1).coerceAtLeast(0))
+                val window = maxOf(1, sampleRate / 32)
+                val end = (sample + window).coerceAtMost(samples.size)
+                var square = 0.0
+                for (i in sample until end) square += samples[i] * samples[i]
+                val rms = if (end > sample) kotlin.math.sqrt(square / (end - sample)) else 0.0
+                ttsLevel.value = rms.toFloat().coerceIn(0f, 1f)
+                lastPoll = android.os.SystemClock.uptimeMillis()
+                try { Thread.sleep(33L) } catch (_: InterruptedException) { break }
+            }
+            if (epoch == playEpoch) {
+                runCatching { track.stop() }
+                runCatching { track.release() }
+                playback = null
+                isSpeaking.value = false
+                ttsLevel.value = 0f
+            }
+        }, "mikova-tts-level").start()
     }
 
     override fun stopSpeaking() {
+        playEpoch++
         val t = playback
         playback = null
+        isSpeaking.value = false
+        ttsLevel.value = 0f
+        runCatching { t?.pause() }
+        runCatching { t?.flush() }
         runCatching { t?.stop() }
         runCatching { t?.release() }
     }
@@ -428,9 +522,9 @@ internal object SherpaJni {
     }.onFailure { Log.w(TAG, "buildOfflineTts failed: ${it.message}") }.getOrNull()
 
     /** 合成;返回 (samples, sampleRate)。失败返回 null。 */
-    fun generate(tts: Any, text: String): Pair<FloatArray, Int>? = runCatching {
+    fun generate(tts: Any, text: String, speakerId: Int): Pair<FloatArray, Int>? = runCatching {
         val audio = tts.javaClass.getMethod("generate", String::class.java, Int::class.javaPrimitiveType, Float::class.javaPrimitiveType)
-            .invoke(tts, text, 0, 1.0f)
+            .invoke(tts, text, speakerId, 1.0f)
         if (audio == null) return null
         val samples = audio.javaClass.getField("samples").get(audio) as FloatArray
         val rate = audio.javaClass.getField("sampleRate").getInt(audio)

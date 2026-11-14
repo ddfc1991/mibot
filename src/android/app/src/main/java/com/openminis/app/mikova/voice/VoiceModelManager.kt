@@ -55,11 +55,11 @@ object VoiceModelManager {
         VoiceModelInfo(
             kind = VoiceModelKind.TTS,
             id = TTS_ID,
-            filename = "vits-zh-aishell3-icefall.tar.bz2",
-            url = "$BASE/$TTS_TAG/vits-zh-aishell3-icefall.tar.bz2",
-            approxBytes = 110L * 1024 * 1024,
-            title = "中文 TTS(vits · aishell3)",
-            subtitle = "离线合成 · 约 110MB · 含 model + tokens + lexicon",
+            filename = "vits-icefall-zh-aishell3.tar.bz2",
+            url = "$BASE/$TTS_TAG/vits-icefall-zh-aishell3.tar.bz2",
+            approxBytes = 32L * 1024 * 1024,
+            title = "中文多音色 TTS(vits · aishell3)",
+            subtitle = "离线合成 · 174 个说话人 · 量化包约 31.6MB（解压后更大）",
         ),
     )
 

@@ -49,8 +49,10 @@ case "$*" in
   'shell dumpsys window') echo "mCurrentFocus=Window{fixture $pkg/com.openminis.app.MainActivity}" ;;
   'exec-out cat /sdcard/ui.xml')
     echo '<hierarchy>'
-    for label in 'Open sidebar' Feed Ideas 'Group chats' Settings Chats 'Warm white' 'Dusk glass' \
-        对话 群聊 设置 打开侧边栏 新对话 试装 启动 运行中 '查看日志（1）' 原功能; do
+    for label in 'Open sidebar' 'Back' Feed Ideas 'Group chats' Settings Chats 'Warm white' 'Dusk glass' \
+        'Mikova Accounts Entry' 'Mibot Voice Entry' 'Mibot Task Queue Entry' \
+        'Mibot WeChat Entry' 'Mibot Wallet Entry' 'Mikova Self Host Entry' \
+        对话 群聊 设置 打开侧边栏 新对话 试装 启动 运行中 '查看日志（1）'; do
       printf '<node content-desc="%s" text="%s" bounds="[0,0][100,100]"/>' "$label" "$label"
     done
     echo '</hierarchy>' ;;

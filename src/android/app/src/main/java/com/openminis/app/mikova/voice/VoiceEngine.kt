@@ -11,6 +11,13 @@ package com.openminis.app.mikova.voice
  * mikova 语音页面的唯一入口。若日后要并入本体选择器,可让 [SherpaVoiceEngine] 额外实现
  * `SpeechRecognitionEngine`(它已经满足 start/stop/cancel/Listener 的形状)。
  */
+data class TtsVoiceChoice(
+    val id: String,
+    val label: String,
+    val detail: String,
+    val online: Boolean,
+)
+
 interface VoiceEngine {
     /** 稳定标识,存偏好用("sherpa" / "platform")。 */
     val id: VoiceEngineId
@@ -36,6 +43,9 @@ interface VoiceEngine {
     /** 放弃这次听;之后不再回调。 */
     fun cancel()
 
+    /** Stop the active modality before starting the other one. */
+    fun interrupt() { stopSpeaking(); cancel() }
+
     /**
      * 转写一段已录好的音频文件(wav,mono PCM16)。sherpa 能离线转;
      * 平台引擎没有"喂文件"的公开接口,默认报不支持。
@@ -46,9 +56,21 @@ interface VoiceEngine {
      * 把文字合成成语音(wav 字节)并(默认)直接播。返回本次合成的 wav 字节,
      * 便于上层缓存/分享;合成不了返回 null。
      */
-    suspend fun synthesize(text: String, play: Boolean = true): ByteArray?
+    suspend fun synthesize(text: String, play: Boolean = true, voiceId: String? = null): ByteArray?
 
-    /** 停掉正在播的 TTS。 */
+    /** Current bundled speaker choices; legacy/platform implementations may expose none. */
+    fun ttsVoices(context: android.content.Context): List<TtsVoiceChoice> = emptyList()
+
+    /** Select a concrete local speaker id; null selects the engine default. */
+    fun setTtsVoice(context: android.content.Context, voiceId: String?) = Unit
+
+    /** Current playback lifecycle state and normalized output level. */
+    val speaking: kotlinx.coroutines.flow.StateFlow<Boolean>?
+        get() = null
+    val outputLevel: kotlinx.coroutines.flow.StateFlow<Float>?
+        get() = null
+
+    /** Stop current playback immediately. */
     fun stopSpeaking()
 
     /** 释放底层资源(so / recognizer / tts / recognizer 实例)。释放后引擎不再可用。 */
@@ -73,8 +95,11 @@ interface VoiceEngine {
         /** 终态 —— 失败。 */
         fun onError(code: VoiceError, message: String? = null)
 
-        /** 实时音量(dB),UI 做动画用;可忽略。 */
+        /** 实时输入音量(dB)，用于声场动画。 */
         fun onLevel(db: Float) {}
+
+        /** 有硬件双声道采集时给出左右能量偏差 [-1, 1]；无数据时为 null。 */
+        fun onDirection(horizontal: Float?) {}
     }
 
     /** BCP-47 语言标签的轻量包装(避免各处直接拼 Locale)。 */

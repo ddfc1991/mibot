@@ -7,7 +7,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,11 +28,18 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,7 +50,12 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -84,6 +106,24 @@ fun VoiceScreen(
     var level by remember { mutableStateOf(0f) }
     var speakText by remember { mutableStateOf("") }
     var speakBusy by remember { mutableStateOf(false) }
+    val voicePrefs = remember(ctx) { ctx.getSharedPreferences("mikova_voice", android.content.Context.MODE_PRIVATE) }
+    var ttsVoiceId by remember(prefer) {
+        mutableStateOf(voicePrefs.getString(if (prefer == VoiceEngineId.SHERPA) "aishell3_voice_id" else "system_voice_id", null))
+    }
+    var voiceChoices by remember(engine.id) { mutableStateOf(engine.ttsVoices(ctx)) }
+    LaunchedEffect(engine.id) {
+        repeat(8) {
+            if (voiceChoices.isNotEmpty()) return@LaunchedEffect
+            kotlinx.coroutines.delay(250)
+            voiceChoices = engine.ttsVoices(ctx)
+        }
+    }
+    var showVoicePicker by remember { mutableStateOf(false) }
+    var previewingVoice by remember { mutableStateOf<String?>(null) }
+    val speaking by (engine.speaking ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
+    val playbackLevel by (engine.outputLevel ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
+    var directionAvailable by remember { mutableStateOf(false) }
+    var directionPan by remember { mutableStateOf<Float?>(null) }
     var micGranted by remember {
         mutableStateOf(
             ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
@@ -144,6 +184,13 @@ fun VoiceScreen(
             override fun onLevel(db: Float) {
                 onMain { level = db.coerceIn(-60f, 0f) }
             }
+
+            override fun onDirection(horizontal: Float?) {
+                onMain {
+                    directionAvailable = horizontal != null
+                    directionPan = horizontal?.coerceIn(-1f, 1f)
+                }
+            }
         }
     }
 
@@ -162,6 +209,11 @@ fun VoiceScreen(
             status = if (prefer == VoiceEngineId.SHERPA) "离线引擎未就绪,请到设置下载模型" else "这台设备不支持语音识别"
             return
         }
+        engine.interrupt()
+        speakBusy = false
+        engine.interrupt()
+        speakBusy = false
+        directionPan = null
         live = ""
         status = "在听…"
         listening = true
@@ -179,24 +231,18 @@ fun VoiceScreen(
         title = "语音",
         onBack = onBack,
         actions = {
-            Box(
-                Modifier
-                    .size(MibotIcon.TopButton)
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .size(48.dp)
                     .frosted(CircleShape, FrostLevel.Bar, elevation = 2.dp)
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            awaitFirstDown()
-                            waitForUpOrCancellation()
-                            onOpenSettings()
-                        }
-                    },
-                contentAlignment = Alignment.Center,
+                    .semantics { contentDescription = "Mikova Voice Settings" },
             ) {
                 Glyph(LineIcons.Settings, size = MibotIcon.Dense, tint = MaterialTheme.colorScheme.onSurface)
             }
         },
     ) {
-        // 引擎状态行
+        // 引擎状态行与真实方向能力
         Row(
             Modifier.fillMaxWidth().padding(horizontal = MibotSpace.Screen),
             verticalAlignment = Alignment.CenterVertically,
@@ -210,6 +256,10 @@ fun VoiceScreen(
             if (prefer == VoiceEngineId.SHERPA && !engine.isAvailable) {
                 StatusChip(text = VoiceEngineFactory.fallbackNotice ?: "已降级", kind = ChipKind.WARN)
             }
+            StatusChip(
+                text = if (directionAvailable) "左右估计" else "单声道 · 无方向",
+                kind = if (directionAvailable) ChipKind.ACCENT else ChipKind.NEUTRAL,
+            )
             Spacer(Modifier.weight(1f))
             Text(
                 if (engine.isAvailable) engine.displayName else "引擎不可用",
@@ -229,7 +279,7 @@ fun VoiceScreen(
                 Modifier
                     .size(if (listening) 132.dp else 112.dp)
                     .frosted(CircleShape, FrostLevel.Card, elevation = if (listening) 6.dp else 2.dp, tint = MibotTokens.selected())
-                    .pointerInput(engine.isAvailable) {
+                    .pointerInput(engine.isAvailable, speaking) {
                         awaitEachGesture {
                             awaitFirstDown()
                             beginListen()
@@ -258,6 +308,24 @@ fun VoiceScreen(
             }
             Spacer(Modifier.height(MibotSpace.M))
             Text(status, fontSize = MibotType.Secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            VoiceParticleField(
+                active = listening || speaking,
+                listening = listening,
+                inputLevelDb = level,
+                outputLevel = playbackLevel,
+                pan = directionPan.takeIf { directionAvailable },
+                onTap = if (speaking) { { engine.stopSpeaking(); speakBusy = false } } else null,
+            )
+            Text(
+                when {
+                    listening && directionAvailable -> "正在听 · 左右为麦克风声道能量估计"
+                    listening -> "正在听 · 设备仅提供单声道，不显示方向"
+                    speaking -> "正在朗读 · 粒子随实际播放音量扩散"
+                    else -> "按住开始聆听；也可点击粒子场打断朗读"
+                },
+                fontSize = MibotType.Caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         // 实时识别文本流
@@ -325,22 +393,90 @@ fun VoiceScreen(
                 Spacer(Modifier.height(MibotSpace.M))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MibotButton(
-                        text = if (speakBusy) "合成中…" else "说话",
+                        text = when {
+                            speakBusy && !speaking -> "合成中…"
+                            speaking -> "停止朗读"
+                            else -> "说话"
+                        },
                         onClick = {
-                            if (speakText.isBlank()) return@MibotButton
-                            speakBusy = true
-                            scope.launch {
-                                engine.synthesize(speakText, play = true)
+                            if (speaking || speakBusy) {
+                                engine.stopSpeaking()
                                 speakBusy = false
+                            } else if (speakText.isNotBlank()) {
+                                engine.interrupt()
+                                speakBusy = true
+                                scope.launch {
+                                    try {
+                                        engine.synthesize(speakText, play = true, voiceId = ttsVoiceId)
+                                    } finally {
+                                        speakBusy = false
+                                    }
+                                }
                             }
                         },
-                        enabled = speakText.isNotBlank() && !speakBusy && engine.isAvailable,
+                        enabled = speakText.isNotBlank() && engine.isAvailable,
                     )
-                    MibotButton(text = "停", onClick = { engine.stopSpeaking() }, tonal = true)
+                    MibotButton(text = "音色", onClick = { showVoicePicker = true }, tonal = true,
+                        enabled = voiceChoices.isNotEmpty())
                 }
             }
         }
 
+        if (showVoicePicker) {
+            val selectedId = ttsVoiceId
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showVoicePicker = false },
+                title = { Text(if (engine.id == VoiceEngineId.SHERPA) "AISHELL3 中文音色" else "系统中文音色") },
+                text = {
+                    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (voiceChoices.isEmpty()) {
+                            Text(if (engine.id == VoiceEngineId.SHERPA) "先到语音设置下载 AISHELL3 模型，启用 174 个离线说话人。"
+                                else "正在读取系统中文语音；若列表为空，请在系统文字转语音设置安装中文语音包。",
+                                fontSize = MibotType.Body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        voiceChoices.forEach { choice ->
+                            val isPreviewing = previewingVoice == choice.id
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            com.openminis.app.mibot.design.MibotRadioRow(
+                                title = choice.label,
+                                subtitle = choice.detail + if (choice.online) " · 在线" else " · 本机",
+                                selected = selectedId == choice.id || (selectedId == null && choice.id.endsWith(":0")),
+                                onClick = {
+                                    ttsVoiceId = choice.id
+                                    engine.setTtsVoice(ctx, choice.id)
+                                    ctx.getSharedPreferences("mikova_voice", android.content.Context.MODE_PRIVATE).edit()
+                                        .putString(if (engine.id == VoiceEngineId.SHERPA) "aishell3_voice_id" else "system_voice_id", choice.id)
+                                        .apply()
+                                },
+                            )
+                            TextButton(onClick = {
+                                if (isPreviewing) {
+                                    engine.stopSpeaking()
+                                    previewingVoice = null
+                                } else {
+                                    engine.setTtsVoice(ctx, choice.id)
+                                    previewingVoice = choice.id
+                                    scope.launch {
+                                        try {
+                                            engine.synthesize("你好，我是你的语音助手。", play = true, voiceId = choice.id)
+                                        } finally {
+                                            if (previewingVoice == choice.id) previewingVoice = null
+                                        }
+                                    }
+                                }
+                            }, enabled = !choice.online || engine.isAvailable, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(if (isPreviewing) "停止" else "试听")
+                            }
+                            }
+                        }
+                        Text("音色来自当前引擎；系统语音需本机安装，离线状态按语音包实际属性显示。",
+                            fontSize = MibotType.Caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showVoicePicker = false }) { Text("完成") } },
+            )
+        }
         Spacer(Modifier.height(MibotSpace.M))
         MibotFootnote(
             if (engine.isAvailable) {
@@ -350,5 +486,83 @@ fun VoiceScreen(
             },
         )
         Spacer(Modifier.height(bottom))
+    }
+}
+
+@Composable
+private fun VoiceParticleField(
+    active: Boolean,
+    listening: Boolean,
+    inputLevelDb: Float,
+    outputLevel: Float,
+    pan: Float?,
+    onTap: (() -> Unit)?,
+) {
+    val context = LocalContext.current
+    val reduceMotion = remember(context) {
+        val power = context.getSystemService(android.os.PowerManager::class.java)?.isPowerSaveMode == true
+        val animator = runCatching {
+            android.provider.Settings.Global.getFloat(context.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        }.getOrDefault(1f)
+        power || animator == 0f
+    }
+    val transition = rememberInfiniteTransition(label = "voiceParticles")
+    val animatedPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(durationMillis = 4200, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart,
+        ),
+        label = "particlePhase",
+    )
+    val phase = if (active && !reduceMotion) animatedPhase else 0f
+    val accent = MaterialTheme.colorScheme.primary
+    val directionText = pan?.let { if (it > 0.12f) "右声道较强" else if (it < -0.12f) "左声道较强" else "左右声道接近" }
+        ?: "单声道 · 无方向数据"
+    Box(
+        Modifier.fillMaxWidth().height(172.dp)
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
+            .semantics {
+                contentDescription = "Quantum voice field"
+                stateDescription = when {
+                    listening -> "正在聆听；$directionText"
+                    active -> "正在朗读"
+                    else -> "静音"
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(width = 260.dp, height = 172.dp)) {
+            val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+            val maxRadius = size.height * 0.44f
+            val energy = if (listening) ((inputLevelDb + 60f) / 60f).coerceIn(0f, 1f)
+                else outputLevel.coerceIn(0f, 1f)
+            val safePhase = if (reduceMotion) 0f else phase
+            drawCircle(accent.copy(alpha = 0.12f + energy * 0.18f), maxRadius * 0.65f, center)
+            drawCircle(accent.copy(alpha = 0.16f + energy * 0.22f), maxRadius * 0.72f,
+                center, style = Stroke(width = 1.2.dp.toPx()))
+            for (i in 0 until 36) {
+                val baseAngle = (Math.PI * 2.0 * i / 36.0).toFloat()
+                val wave = (kotlin.math.sin(safePhase + i * 0.79f) + 1f) * 0.5f
+                val amount = if (active) 0.13f + energy * 0.72f else 0.055f + wave * 0.05f
+                // Stereo pan is a coarse left/right energy balance, never an absolute bearing.
+                val panShift = (pan ?: 0f) * maxRadius * 0.22f
+                val angle = baseAngle
+                val radius = if (listening) maxRadius * (0.63f - amount * 0.28f + wave * 0.035f)
+                    else maxRadius * (0.62f + amount * 0.34f + wave * 0.025f)
+                val x = center.x + kotlin.math.cos(angle) * radius + if (kotlin.math.cos(angle) >= 0) panShift else -panShift
+                val y = center.y + kotlin.math.sin(angle) * radius
+                val alpha = (0.32f + energy * 0.55f + wave * 0.1f).coerceIn(0f, 0.95f)
+                drawCircle(accent.copy(alpha = alpha), (1.4f + energy * 2.2f) * density,
+                    androidx.compose.ui.geometry.Offset(x, y))
+            }
+        }
+        if (active) {
+            Text(if (listening) "LISTENING" else "SPEAKING",
+                fontSize = 10.dp.value.sp, letterSpacing = 1.2.sp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f))
+        }
     }
 }

@@ -59,16 +59,7 @@ link() {
   # Keep the URI quoted for Android's remote shell as well (query strings).
   start "$OUT/link-$link_count.txt" -a android.intent.action.VIEW -d "'minis://settings/$1'" "$PKG"
 }
-# V7 currently exposes the original glass scaffold through its real 原功能 entry.
-# Assert that navigation works before running all existing glass tab checks.
-legacy() {
-  for attempt in 1 2 3; do
-    if tap text "原功能"; then sleep 3; return; fi
-    adb shell input swipe 540 1700 540 700 400; sleep 2
-  done
-  abort "V7 原功能 entry not found"
-}
-
+# The original five-tab Mibot glass shell is the default home.
 adb shell getprop ro.product.cpu.abilist | tee "$OUT/abilist.txt"
 adb logcat -c || true
 if ! adb install -r -g "$APK" 2>&1 | tee "$OUT/install.txt"; then abort "install failed"; fi
@@ -87,7 +78,6 @@ launch en
 sleep 25
 alive || abort "app not running after launch"
 shot 00-entry 1
-legacy
 shot 01-chats 2
 
 tap desc "Open sidebar" && shot 02-sidebar 3 || abort "sidebar button not found"
@@ -96,6 +86,25 @@ adb shell input keyevent KEYCODE_BACK; sleep 2
 for t in Feed:03-feed Ideas:04-ideas "Group chats":05-groups Settings:06-settings; do
   name="${t%%:*}"; file="${t##*:}"
   if tap desc "$name"; then shot "$file" 3; else abort "tab $name not found"; fi
+done
+# Click the new feature entries inside the existing Mibot glass settings page.
+# Settings is a real long list, so scroll the app view until each row is reachable.
+mkdir -p "$OUT/modules"
+settings_entry() {
+  local desc="$1" found=0
+  for attempt in 1 2 3 4 5 6 7 8; do
+    if tap desc "$desc" >/dev/null 2>&1; then found=1; break; fi
+    adb shell input swipe 540 1720 540 700 350; sleep 1
+  done
+  [ "$found" -eq 1 ]
+}
+for item in "Mikova Accounts Entry:accounts" "Mibot Voice Entry:voice" "Mibot Task Queue Entry:tasks" "Mibot WeChat Entry:wechat" "Mibot Wallet Entry:wallet" "Mikova Self Host Entry:selfhost"; do
+  desc="${item%%:*}"; file="${item##*:}"
+  settings_entry "$desc" || abort "settings entry $desc not found"
+  shot "modules/$file" 4
+  tap desc "Back" || abort "Back control not found after $file"
+  sleep 2
+  tap desc "Settings" || abort "Settings tab unavailable after $file"
 done
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
@@ -129,8 +138,7 @@ front() { adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocused
 home() { adb shell input keyevent KEYCODE_BACK; sleep 2
   front || { launch home; sleep 4; }
   if ! tap desc "对话" >/dev/null 2>&1; then
-    legacy
-    tap desc "对话" || abort "glass chats tab not found after returning home"
+    tap desc "Chats" || abort "glass chats tab not found after returning home"
   fi
   sleep 1; }
 adb shell am force-stop "$PKG"; adb shell pm clear "$PKG" >/dev/null 2>&1 || true
@@ -140,7 +148,6 @@ for th in 1:light 2:dark; do
   zlaunch "$m" "$n" 14
   alive || abort "app not running (zh $n)"
   zshot "$n-00-entry" 1
-  legacy
   zshot "$n-01-onboarding" 1
   tap desc "群聊" && zshot "$n-04-groups" 3 || abort "zh 群聊 tab not found ($n)"
   tap desc "设置" && zshot "$n-05-settings" 3 || abort "zh 设置 tab not found ($n)"
