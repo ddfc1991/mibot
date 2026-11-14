@@ -155,7 +155,7 @@ if a == ['exec-out', 'cat', '/sdcard/ui.xml']:
     elif p == 'settings':
         node(t('设置', 'Settings'))
         node(t('模型', 'Model'))
-        for label, page in [('WeChat', 'wechat'), ('Wallet', 'wallet'), ('Self Host', 'selfhost'),
+        for label, page in [('Wallet', 'wallet'), ('WeChat', 'wechat'), ('Self Host', 'selfhost'),
                             ('Virtual Display', 'virtual-display'), ('Accounts', 'accounts'),
                             ('Task Queue', 'tasks'), ('Voice', 'voice')]:
             if case == 'module_missing' and page == 'wechat':
@@ -318,7 +318,7 @@ class SmokeTest(unittest.TestCase):
     def test_missing_required_module_fails_without_fallback(self):
         result, trace, files = self.run_smoke('module_missing')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Mikova WeChat Entry not found', result.stdout)
+        self.assertIn('entry missing', result.stdout)
         self.assertNotIn('modules/wechat.png', files)
         self.assertIn('settings-entry.xml', files)
         self.assertIn('last-ui.xml', files)

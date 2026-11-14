@@ -121,6 +121,9 @@ modules() {
       tasks) tap desc "$desc" || abort 'Task queue entry missing'; shot "$prefix/$file" 1 --text 'Task queue|任务队列' --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks' ;;
       voice) tap desc "$desc" || abort 'Voice entry missing'; shot "$prefix/$file" 1 --text '语音|Voice' --desc 'Mikova Voice Settings' --desc Back ;;
     esac
+    module_back
+    probe top || abort "Settings list did not return after $file"
+    probe check --text Settings --desc 'Mikova Accounts Entry' || abort "Settings page unavailable after $file"
     alive || abort "app died during $file module screenshot"
   done
 }

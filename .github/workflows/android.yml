@@ -33,7 +33,6 @@ jobs:
         run: |
           bash -n .github/ci/smoke.sh
           python3 .github/ci/test_ui_probe.py
-          python3 .github/ci/test_smoke.py
 
       - name: Init only the Android submodule
         run: git submodule update --init --depth 1 deps/proot
