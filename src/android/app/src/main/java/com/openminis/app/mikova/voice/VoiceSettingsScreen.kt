@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,7 +44,9 @@ import com.openminis.app.mibot.design.MibotType
 import com.openminis.app.mibot.design.StatusChip
 import com.openminis.app.ui.glass.FrostLevel
 import com.openminis.app.ui.glass.frosted
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * [mikova/voice] 语音设置(glass):引擎选择(sherpa 优先 / 平台兜底)+ 模型管理
@@ -66,7 +70,34 @@ fun VoiceSettingsScreen(
         installedIds = VoiceModelManager.installed(ctx).map { it.id }.toSet()
     }
 
-    LaunchedEffect(Unit) { refreshInstalled() }
+    var nativeReady by remember { mutableStateOf<Boolean?>(null) }
+    var deleteCandidate by remember { mutableStateOf<VoiceModelInfo?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        nativeReady = withContext(Dispatchers.IO) { SherpaVoiceEngine.isNativeLoaded() }
+        refreshInstalled()
+    }
+    deleteCandidate?.let { info ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) deleteCandidate = null },
+            title = { Text("删除语音模型？") },
+            text = { Text(deleteError ?: "将删除“${info.title}”的本地文件。再次使用离线能力需要重新下载。") },
+            confirmButton = {
+                TextButton(enabled = !deleting, onClick = {
+                    deleting = true
+                    scope.launch {
+                        try {
+                            val ok = withContext(Dispatchers.IO) { VoiceModelManager.delete(ctx, info) }
+                            refreshInstalled()
+                            if (ok) deleteCandidate = null else deleteError = "删除失败，请重试"
+                        } finally { deleting = false }
+                    }
+                }) { Text(if (deleting) "删除中…" else "删除") }
+            },
+            dismissButton = { TextButton(enabled = !deleting, onClick = { deleteCandidate = null }) { Text("取消") } },
+        )
+    }
 
     MibotScaffold(title = "语音设置", onBack = onBack) {
         // 引擎选择
@@ -89,7 +120,11 @@ fun VoiceSettingsScreen(
             }
         }
         MibotFootnote(
-            "选离线时,引擎不可用(native so 加载失败或模型缺失)会自动用系统识别,语音页顶部会显示降级 chip。",
+            when (nativeReady) {
+                null -> "正在检查离线运行库…"
+                false -> "本版本不含可用离线运行库。仅下载模型不能启用离线能力，请使用系统语音；系统朗读与识别独立。"
+                true -> "离线运行库可用；仍需完整识别/合成模型。缺少模型时识别回退系统服务，可能联网。"
+            },
         )
 
         // 模型管理
@@ -163,8 +198,8 @@ fun VoiceSettingsScreen(
                             MibotButton(
                                 text = "删除",
                                 onClick = {
-                                    VoiceModelManager.delete(ctx, info)
-                                    refreshInstalled()
+                                    deleteError = null
+                                    deleteCandidate = info
                                 },
                                 tonal = true,
                                 compact = true,
@@ -195,7 +230,7 @@ fun VoiceSettingsScreen(
 
         Spacer(Modifier.height(MibotSpace.M))
         MibotFootnote(
-            "模型来自 k2-fsa/sherpa-onnx 官方 Releases(asr-models / tts-models 两个 tag),下载到本应用私有目录,卸载即清。首次下载约 160MB,建议 Wi-Fi。",
+            "模型来自 k2-fsa/sherpa-onnx 官方 Releases，下载到应用私有目录。两包共约 542.8MB，解包需更多空间，建议 Wi-Fi。sherpa-onnx 代码许可为 Apache-2.0；模型许可独立。",
         )
         Spacer(Modifier.height(MibotSpace.L))
     }

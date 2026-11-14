@@ -12,18 +12,11 @@ import java.net.URL
 
 /** 自托管配置（本地 vs 远端 / 服务器地址 / API Key）。 */
 data class SelfHostState(
-    /** false = 数据只存本机；true = 把 Mibot 的数据/能力指向你自己的服务器。 */
+    /** Saved connection preference only. No data or task executor consumes this flag yet. */
     val enabled: Boolean = false,
     val serverUrl: String = "",
     /** 只暴露「是否已设置」，不回读明文。 */
     val hasApiKey: Boolean = false,
-)
-
-/** 「测试连接」的结果。 */
-data class SelfHostTestResult(
-    val ok: Boolean,
-    val message: String,
-    val latencyMs: Long,
 )
 
 /**
@@ -54,10 +47,24 @@ class SelfHostConfig(context: Context) {
             .apply()
     }
 
-    /** 数据自托管开关（本地 ↔ 远端）。 */
-    fun setEnabled(on: Boolean) = persist { it.copy(enabled = on) }
+    /** Saving a connection does not activate remote execution or migrate local data. */
+    fun save(url: String, replacementKey: String? = null) {
+        val normalized = EndpointPolicy.normalize(url, replacementKey?.isNotBlank() ?: state.value.hasApiKey)
+        if (replacementKey != null) require(replacementKey.none { it == '\r' || it == '\n' }) { "密钥不能包含换行" }
+        // Do not carry an old secret to another origin without an explicit replacement.
+        val previous = state.value.serverUrl
+        if (previous.isNotBlank() && previous != normalized && replacementKey == null && state.value.hasApiKey) {
+            require(java.net.URI(previous).let { Triple(it.scheme, it.host, it.port) } ==
+                java.net.URI(normalized).let { Triple(it.scheme, it.host, it.port) }) { "更换服务器时请重新填写密钥，原密钥不会转发到新地址" }
+        }
+        val edit = prefs.edit().putString(K_URL, normalized).putBoolean(K_ENABLED, false)
+        if (replacementKey != null) edit.putString(K_KEY, replacementKey.trim())
+        check(edit.commit()) { "配置保存未完成，请重试" }
+        state.value = load()
+    }
 
-    fun setServerUrl(url: String) = persist { it.copy(serverUrl = url.trim()) }
+    fun setEnabled(on: Boolean) = persist { it.copy(enabled = on) }
+    fun setServerUrl(url: String) = save(url)
 
     /** 写入即加密落盘；只更新「是否已设置」标志，不把明文放进 StateFlow。 */
     fun setApiKey(key: String) {
@@ -78,33 +85,8 @@ class SelfHostConfig(context: Context) {
      * 纯 HttpURLConnection，无额外依赖。
      */
     suspend fun testConnection(): SelfHostTestResult = withContext(Dispatchers.IO) {
-        val raw = state.value.serverUrl.trim()
-        if (raw.isBlank()) return@withContext SelfHostTestResult(false, "请先填写服务器地址", 0)
-        val full = if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "https://$raw"
-        val t0 = System.currentTimeMillis()
-        var conn: HttpURLConnection? = null
-        try {
-            conn = (URL(full).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 8000
-                setRequestProperty("Accept", "application/json")
-                val key = apiKey()
-                if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer $key")
-            }
-            val code = conn.responseCode
-            val ms = System.currentTimeMillis() - t0
-            if (code in 200..299) {
-                SelfHostTestResult(true, "连接成功 · HTTP $code", ms)
-            } else {
-                val body = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty().take(120)
-                SelfHostTestResult(false, "HTTP $code $body".trim(), ms)
-            }
-        } catch (e: Exception) {
-            SelfHostTestResult(false, "${e.javaClass.simpleName}: ${e.message}".take(160), System.currentTimeMillis() - t0)
-        } finally {
-            conn?.disconnect()
-        }
+        val snapshot = state.value
+        SelfHostProbe.test(snapshot.serverUrl, apiKey())
     }
 
     companion object {

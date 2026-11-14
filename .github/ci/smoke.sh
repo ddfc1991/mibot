@@ -41,8 +41,16 @@ PKG="$(python3 -c 'import re, sys; text = open(sys.argv[1]).read(); match = re.s
 echo "$PKG" | tee "$OUT/package.txt"
 
 alive() { adb shell pidof "$PKG" >/dev/null 2>&1; }
-shot() { sleep "${2:-3}"; alive || abort "app died before screenshot $1"; adb exec-out screencap -p > "$OUT/$1.png"; echo "shot: $1 ($(stat -c%s "$OUT/$1.png") bytes)"; }
-tap() { python3 "$HERE/tap.py" "$@"; }
+probe() { python3 "$HERE/ui_probe.py" "$@"; }
+shot() {
+  local file="$1" pause="$2"; shift 2
+  sleep "$pause"; alive || abort "app died before screenshot $file"
+  mkdir -p "$(dirname "$OUT/$file")"
+  probe check --save "$OUT/$file.xml" "$@" || abort "UI assertion failed: $file"
+  adb exec-out screencap -p > "$OUT/$file.png" || abort "screenshot failed: $file"
+  echo "shot: $file ($(stat -c%s "$OUT/$file.png") bytes)"
+}
+tap() { probe tap "$@"; }
 start() {
   local log="$1"; shift
   if ! adb shell am start -W "$@" > "$log" 2>&1; then
@@ -66,6 +74,8 @@ if ! adb install -r -g "$APK" 2>&1 | tee "$OUT/install.txt"; then abort "install
 grep -q '^Success' "$OUT/install.txt" || abort "install did not report success"
 adb shell pm path "$PKG" > "$OUT/package-path.txt" 2>&1 || abort "installed package query failed"
 grep -q '^package:' "$OUT/package-path.txt" || abort "APK package $PKG is not installed"
+# CI owns this emulator installation: never photograph an existing account/key.
+adb shell pm clear "$PKG" > "$OUT/clean-install.txt" 2>&1 || abort 'cannot clear CI app data'
 
 adb shell settings put system screen_off_timeout 1800000 || true
 adb shell svc power stayon true || true
@@ -77,35 +87,86 @@ adb shell wm dismiss-keyguard || true
 launch en
 sleep 25
 alive || abort "app not running after launch"
-shot 00-entry 1
-shot 01-chats 2
+shot 00-entry 1 --text 'Welcome to Mibot' --text 'Add a Provider' --desc 'Open sidebar'
+shot 01-chats 1 --text 'Select Models' --desc Chats
 
-tap desc "Open sidebar" && shot 02-sidebar 3 || abort "sidebar button not found"
-adb shell input keyevent KEYCODE_BACK; sleep 2
+tap desc "Open sidebar" && shot 02-sidebar 1 --desc 'New chat' || abort "sidebar button not found"
+adb shell input keyevent KEYCODE_BACK; sleep 1
 
-for t in Feed:03-feed Ideas:04-ideas "Group chats":05-groups Settings:06-settings; do
-  name="${t%%:*}"; file="${t##*:}"
-  if tap desc "$name"; then shot "$file" 3; else abort "tab $name not found"; fi
-done
-# Click the new feature entries inside the existing Mibot glass settings page.
-# Settings is a real long list, so scroll the app view until each row is reachable.
-mkdir -p "$OUT/modules"
+tap desc Feed && shot 03-feed 1 --text Feed --text 'What happened in the app, newest first' || abort 'Feed tab missing'
+tap desc Ideas && shot 04-ideas 1 --text Ideas --text 'New idea' || abort 'Ideas tab missing'
+tap desc 'Group chats' && shot 05-groups 1 --text 'Group chats' --text 'New group chat' || abort 'Groups tab missing'
+tap desc Settings && shot 06-settings 1 --text Settings --text Model || abort 'Settings tab missing'
+
+# Each entry starts at the top, even after returning to a restored list offset.
+# One lookup per dump; both directions stop at a stable boundary or a hard cap.
 settings_entry() {
-  local desc="$1" found=0
-  for attempt in 1 2 3 4 5 6 7 8; do
-    if tap desc "$desc" >/dev/null 2>&1; then found=1; break; fi
-    adb shell input swipe 540 1720 540 700 350; sleep 1
-  done
-  [ "$found" -eq 1 ]
+  probe tap desc "$1" --top --scrolls 10 --save "$OUT/settings-entry.xml"
 }
-for item in "Mikova Accounts Entry:accounts" "Mibot Voice Entry:voice" "Mibot Task Queue Entry:tasks" "Mibot WeChat Entry:wechat" "Mibot Wallet Entry:wallet" "Mikova Self Host Entry:selfhost"; do
-  desc="${item%%:*}"; file="${item##*:}"
-  settings_entry "$desc" || abort "settings entry $desc not found"
-  shot "modules/$file" 4
-  tap desc "Back" || abort "Back control not found after $file"
-  sleep 2
-  tap desc "Settings" || abort "Settings tab unavailable after $file"
-done
+module_back() {
+  tap desc Back || abort "module Back control missing"
+  sleep 1
+}
+modules() {
+  local prefix="$1" tab="$2" item desc file
+  local wechat_title='WeChat bridge' wechat_control='WeChat channel'
+  local wallet_title=Wallet balance='Available balance' payment='No pay channel'
+  local accounts_title='Account hub' add_account='+ Add account' collapse=Collapse tasks_title='Task queue'
+  if [ "$tab" = 设置 ]; then
+    wechat_title=微信接入; wechat_control=微信通道
+    wallet_title=钱包; balance=可用余额; payment=未接支付通道
+    accounts_title=账号连接中心; add_account='+ 添加账号'; collapse=收起目录; tasks_title=任务队列
+  fi
+  mkdir -p "$OUT/$prefix"
+  for item in 'WeChat:wechat' 'Wallet:wallet' 'Self Host:selfhost' 'Virtual Display:virtual-display' 'Accounts:accounts' 'Task Queue:tasks' 'Voice:voice'; do
+    desc="Mikova ${item%%:*} Entry"; file="${item##*:}"
+    tap desc "$tab" || abort "Settings tab unavailable before $file"
+    settings_entry "$desc" || abort "settings entry $desc not found"
+    case "$file" in
+      wechat)
+        shot "$prefix/$file" 1 --text "$wechat_title" --text "$wechat_control" --desc Back ;;
+      wallet)
+        shot "$prefix/$file" 1 --text "$wallet_title" --text "$balance" --text "$payment" --desc Back ;;
+      selfhost)
+        shot "$prefix/$file" 1 --text 'Self-host connection|自托管连接' --desc 'Mikova SelfHost URL' --desc 'Mikova SelfHost Save' --desc 'Mikova SelfHost Test' --desc Back
+        probe tap desc 'Mikova SelfHost Guide' --scrolls 5 --save "$OUT/$prefix/selfhost-guide-before.xml" || abort 'selfhost guide missing'
+        shot "$prefix/selfhost-guide" 1 --desc 'Mikova SelfHost Guide' --expanded-from "$OUT/$prefix/selfhost-guide-before.xml" --desc Back ;;
+      virtual-display)
+        shot "$prefix/$file" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back ;;
+      accounts)
+        shot "$prefix/$file" 1 --text "$accounts_title" --text "$add_account" --desc Back
+        if [ "$tab" = Settings ]; then tap text '+ Add account'; else tap text '+ 添加账号'; fi || abort 'account catalog control missing'
+        shot "$prefix/accounts-catalog" 1 --text "$accounts_title" --text "$collapse" --desc Back ;;
+      tasks)
+        shot "$prefix/$file" 1 --text "$tasks_title" --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks'
+        tap desc 'Mibot New Task' || abort 'new task control missing'
+        shot "$prefix/task-new-chat" 1 --desc Back --desc Attach
+        module_back
+        shot "$prefix/task-return" 1 --text "$tasks_title" --desc 'Mibot New Task' ;;
+      voice)
+        # The voice screen/settings are currently Chinese even in the English pass.
+        shot "$prefix/$file" 1 --text 语音 --desc 'Mikova Voice Settings' --desc Back
+        probe tap desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing'
+        adb shell input keyevent KEYCODE_MOVE_END
+        # The only persisted content is our 13-character ASCII sample. Clear it
+        # with bounded deletes; adb keyevent cannot send a Shift+Home chord.
+        adb shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+        adb shell input text MikovaDraft42 || abort 'cannot enter voice draft'
+        adb shell input keyevent KEYCODE_BACK; sleep 1
+        shot "$prefix/voice-draft" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42
+        probe top || abort 'voice top unavailable'
+        tap desc 'Mikova Voice Settings' || abort 'voice settings control missing'
+        shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc Back
+        module_back
+        probe seek desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing after Back'
+        shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42 ;;
+    esac
+    module_back
+    # A missing/incorrect return page must fail before another navigation hides it.
+    probe check --desc "$tab" || abort "glass shell missing after $file"
+  done
+}
+modules modules Settings
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 
@@ -132,7 +193,7 @@ ZH="$OUT/zh"; mkdir -p "$ZH"
 zlaunch() { adb shell am force-stop "$PKG"; sleep 1
   start "$ZH/start-$2.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true \
     --es ci_lang zh-CN --ez ci_vault_demo true --ei ci_theme "$1"; sleep "${3:-12}"; }
-zshot() { sleep "${2:-3}"; alive || abort "app died before screenshot zh/$1"; adb exec-out screencap -p > "$ZH/$1.png"; echo "zh shot: $1 ($(stat -c%s "$ZH/$1.png") bytes)"; }
+zshot() { local file="$1"; shift; shot "zh/$file" "$@"; }
 # Back to the chats tab; relaunch if Back left the app.
 front() { adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -Fq "$PKG"; }
 home() { adb shell input keyevent KEYCODE_BACK; sleep 2
@@ -147,16 +208,25 @@ for th in 1:light 2:dark; do
   m="${th%%:*}"; n="${th##*:}"
   zlaunch "$m" "$n" 14
   alive || abort "app not running (zh $n)"
-  zshot "$n-00-entry" 1
-  zshot "$n-01-onboarding" 1
-  tap desc "群聊" && zshot "$n-04-groups" 3 || abort "zh 群聊 tab not found ($n)"
-  tap desc "设置" && zshot "$n-05-settings" 3 || abort "zh 设置 tab not found ($n)"
-  tap desc "对话" >/dev/null 2>&1 || true; sleep 2
-  if tap desc "打开侧边栏"; then
-    zshot "$n-03-sidebar" 3
-    if tap desc "新对话"; then zshot "$n-02-chat" 3; adb shell input keyevent KEYCODE_BACK; sleep 1; else echo "::warning::zh new-chat not found ($n)"; fi
-  else echo "::warning::zh sidebar button not found ($n)"; fi
-  home
+  zshot "$n-00-entry" 1 --text '欢迎使用 Mibot' --desc 对话
+  zshot "$n-01-onboarding" 1 --text 添加供应商 --text 选择模型
+  tap desc 动态 && zshot "$n-feed" 1 --text 动态 --text '应用里发生的事，最新的在最上面' || abort "zh 动态 tab missing ($n)"
+  tap desc 点子 && zshot "$n-ideas" 1 --text 点子 --text 新点子 || abort "zh 点子 tab missing ($n)"
+  tap desc 群聊 && zshot "$n-04-groups" 1 --text 群聊 --text 新建群聊 || abort "zh 群聊 tab missing ($n)"
+  tap desc 设置 && zshot "$n-05-settings" 1 --text 设置 --text 模型 || abort "zh 设置 tab missing ($n)"
+  modules "zh/$n-modules" 设置
+  tap desc 对话 || abort "zh 对话 tab missing ($n)"
+  tap desc 打开侧边栏 && zshot "$n-03-sidebar" 1 --desc 新对话 || abort "zh sidebar missing ($n)"
+  tap desc 新对话 && zshot "$n-02-chat" 1 --desc Back --desc Attach || abort "zh new chat missing ($n)"
+  adb shell input keyevent KEYCODE_BACK; sleep 1
+  probe check --desc 对话 || abort "zh shell missing after new chat ($n)"
+done
+# All required modules in BOTH Chinese themes are captured before any network
+# catalog or legacy capability attempts. These remain diagnostic, not proof of
+# task execution, account authorization, TTS quality, or working hidden displays.
+for th in 1:light 2:dark; do
+  m="${th%%:*}"; n="${th##*:}"
+  zlaunch "$m" "$n-legacy" 8
   link vault;        zshot "$n-06-vault" 4;    home
   link gateway;      zshot "$n-07-gateway" 4;  home
   link sandbox;      zshot "$n-08-sandbox" 4;  home
@@ -209,6 +279,7 @@ adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb exec-out cat /s
 # The x86_64 image runs the arm64 app through native-bridge translation, so the
 # PRoot sandbox may not come up here; the plugin page then shows 失败 + its log.
 DSH="$OUT/dsh"; mkdir -p "$DSH"
+echo 'optional diagnostic; execution not verified' > "$DSH/verdict.txt"
 link "plugin?name=alchaincyf/nuwa-skill"; sleep 12
 if tap text "试装"; then sleep 40; fi
 adb exec-out screencap -p > "$DSH/1-installed.png"

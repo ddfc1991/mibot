@@ -54,12 +54,22 @@ interface VoiceEngine {
 
     /**
      * 把文字合成成语音(wav 字节)并(默认)直接播。返回本次合成的 wav 字节,
-     * 便于上层缓存/分享;合成不了返回 null。
+     * 便于上层缓存/分享；合成不了或已取消返回 null。play=true 在提交播放后返回，
+     * 播放结束由 speaking/outputLevel 反映；stopSpeaking 同时作废仍在进行的合成。
      */
     suspend fun synthesize(text: String, play: Boolean = true, voiceId: String? = null): ByteArray?
 
-    /** Current bundled speaker choices; legacy/platform implementations may expose none. */
+    /** Cached speaker choices; built-in engines prepare asynchronously when queried. */
     fun ttsVoices(context: android.content.Context): List<TtsVoiceChoice> = emptyList()
+
+    /** Prepare voices off the UI thread; an empty cache/initialization timeout can be retried. */
+    suspend fun loadTtsVoices(context: android.content.Context): List<TtsVoiceChoice> = ttsVoices(context)
+
+    /** TTS availability is independent of ASR; read after loadTtsVoices for asynchronous engines. */
+    val canSynthesize: Boolean get() = true
+
+    /** TTS status is independent of ASR availability. */
+    val ttsStatus: kotlinx.coroutines.flow.StateFlow<String?>? get() = null
 
     /** Select a concrete local speaker id; null selects the engine default. */
     fun setTtsVoice(context: android.content.Context, voiceId: String?) = Unit
@@ -95,10 +105,10 @@ interface VoiceEngine {
         /** 终态 —— 失败。 */
         fun onError(code: VoiceError, message: String? = null)
 
-        /** 实时输入音量(dB)，用于声场动画。 */
+        /** UI 输入电平约 [-60, 0]；系统识别是相对响度，非标定 dBFS。 */
         fun onLevel(db: Float) {}
 
-        /** 有硬件双声道采集时给出左右能量偏差 [-1, 1]；无数据时为 null。 */
+        /** 仅在物理方向能力得到验证时报告方向；声道能量差不代表声源位置，未知为 null。 */
         fun onDirection(horizontal: Float?) {}
     }
 
@@ -139,7 +149,8 @@ object VoiceEngineFactory {
         }
         val platform = PlatformVoiceEngine(app)
         fallbackNotice = if (prefer == VoiceEngineId.SHERPA) {
-            "离线引擎不可用,已用系统识别兜底"
+            if (!SherpaVoiceEngine.isNativeLoaded()) "本版本不含可用离线运行库，已用系统识别；系统朗读独立检测"
+            else "缺少完整离线识别模型，已用系统识别；朗读与识别独立"
         } else {
             null
         }

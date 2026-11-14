@@ -32,6 +32,7 @@ jobs:
       - name: Smoke script regression tests
         run: |
           bash -n .github/ci/smoke.sh
+          python3 .github/ci/test_ui_probe.py
           python3 .github/ci/test_smoke.py
 
       - name: Init only the Android submodule
@@ -133,6 +134,10 @@ jobs:
           else
             echo "::warning::MIBOT_KEYSTORE_B64 not set; using the runner's debug key"
           fi
+
+      - name: Run Android unit tests
+        working-directory: src/android
+        run: ./gradlew --no-daemon :app:testGithubDebugUnitTest -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8"
 
       - name: assembleDebug
         working-directory: src/android

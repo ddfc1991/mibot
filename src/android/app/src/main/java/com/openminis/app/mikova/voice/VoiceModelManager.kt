@@ -2,7 +2,13 @@ package com.openminis.app.mikova.voice
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +24,7 @@ import java.net.URL
 /**
  * [mikova/voice] 模型管理:sherpa-onnx 模型的目录、清单、下载(带进度)与删除。
  *
- * 模型全部落到 `filesDir/models/<id>/`;已安装的判定 = 目录里有 `tokens.txt` 且至少一个 `.onnx`。
+ * 模型落到 `filesDir/models/<id>/`；按模型类型校验完整权重/词表/词典，支持官方包的顶层目录。
  * 下载的是 sherpa-onnx release 上的 `.tar.bz2` 模型包,用 commons-compress 解包
  * (bzip2 + tar;依赖见 INTEGRATION.md 的 build.gradle 声明)。
  *
@@ -35,47 +41,56 @@ object VoiceModelManager {
     /** 模型根目录。 */
     fun modelsRoot(context: Context): File = File(context.filesDir, "models")
 
-    fun asrModelDir(context: Context): File = File(modelsRoot(context), ASR_ID)
-    fun ttsModelDir(context: Context): File = File(modelsRoot(context), TTS_ID)
+    fun asrModelDir(context: Context): File = resolveModelDir(File(modelsRoot(context), ASR_ID), VoiceModelKind.ASR)
+    fun ttsModelDir(context: Context): File = resolveModelDir(File(modelsRoot(context), TTS_ID), VoiceModelKind.TTS)
 
     private const val ASR_ID = "streaming-zipformer-zh-en"
     private const val TTS_ID = "vits-zh-aishell3"
 
-    /** 官方模型清单(ASR ~50MB / TTS ~110MB,见 title 里的近似大小)。 */
+    /** Official Release asset sizes verified 2026-11-14; compressed bytes, not installed footprint. */
     val CATALOG: List<VoiceModelInfo> = listOf(
         VoiceModelInfo(
             kind = VoiceModelKind.ASR,
             id = ASR_ID,
             filename = "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
             url = "$BASE/$ASR_TAG/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
-            approxBytes = 50L * 1024 * 1024,
+            approxBytes = 511_274_346L,
             title = "流式中文 ASR(zipformer 中英双语)",
-            subtitle = "实时识别 · 约 50MB · 解包后含 encoder/decoder/joiner + tokens",
+            subtitle = "实时识别 · 下载约 511.3MB · 解包后更大",
         ),
         VoiceModelInfo(
             kind = VoiceModelKind.TTS,
             id = TTS_ID,
             filename = "vits-icefall-zh-aishell3.tar.bz2",
             url = "$BASE/$TTS_TAG/vits-icefall-zh-aishell3.tar.bz2",
-            approxBytes = 32L * 1024 * 1024,
+            approxBytes = 31_559_701L,
             title = "中文多音色 TTS(vits · aishell3)",
-            subtitle = "离线合成 · 174 个说话人 · 量化包约 31.6MB（解压后更大）",
+            subtitle = "离线合成 · 下载约 31.6MB · 音色数以加载模型后为准",
         ),
     )
 
     fun catalogFor(kind: VoiceModelKind): List<VoiceModelInfo> = CATALOG.filter { it.kind == kind }
 
-    /** 已安装的模型(有 tokens + onnx 的那几个)。 */
     fun installed(context: Context): List<VoiceModelInfo> = CATALOG.filter { isInstalled(context, it) }
 
-    /** 单个模型是否已安装:目录存在、有 tokens.txt、且至少一个 .onnx。 */
-    fun isInstalled(context: Context, info: VoiceModelInfo): Boolean {
-        val dir = dirFor(context, info)
-        if (!dir.isDirectory) return false
-        val names = dir.list().orEmpty()
-        val hasTokens = names.any { it.endsWith(".txt") && it.contains("tokens") }
-        val hasOnnx = names.any { it.endsWith(".onnx") }
-        return hasTokens && hasOnnx
+    fun isInstalled(context: Context, info: VoiceModelInfo): Boolean =
+        validModelDir(resolveModelDir(dirFor(context, info), info.kind), info.kind)
+
+    internal fun validModelDir(dir: File, kind: VoiceModelKind): Boolean {
+        fun present(name: String) = File(dir, name).let { it.isFile && it.length() > 0 }
+        if (!present("tokens.txt")) return false
+        return when (kind) {
+            VoiceModelKind.ASR -> listOf("encoder", "decoder", "joiner").all { prefix ->
+                dir.listFiles().orEmpty().any { it.isFile && it.length() > 0 && it.name.startsWith(prefix) && it.name.endsWith(".onnx") }
+            }
+            VoiceModelKind.TTS -> present("model.onnx") && present("lexicon.txt")
+        }
+    }
+
+    internal fun resolveModelDir(root: File, kind: VoiceModelKind): File {
+        if (validModelDir(root, kind)) return root
+        return root.listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }
+            .firstOrNull { validModelDir(it, kind) } ?: root
     }
 
     fun hasAsrModel(context: Context): Boolean = CATALOG.filter { it.kind == VoiceModelKind.ASR }.any { isInstalled(context, it) }
@@ -101,70 +116,77 @@ object VoiceModelManager {
     fun stateOf(id: String): DownloadState = progress.value[id] ?: DownloadState.Idle
 
     private fun set(id: String, s: DownloadState) {
-        progress.value = progress.value + (id to s)
+        progress.update { it + (id to s) }
     }
 
-    /**
-     * 下载 + 解包一个模型。**串行**(一次一个),失败置 Failed 并保留半成品目录供重试。
-     * 已装好的直接 Done。返回最终状态。
-     */
+    private val downloadMutex = Mutex()
+
+    /** Stage extraction before publishing. Cancellation never marks a partial model installed. */
     suspend fun download(context: Context, info: VoiceModelInfo): DownloadState = withContext(Dispatchers.IO) {
-        if (isInstalled(context, info)) {
-            set(info.id, DownloadState.Done)
-            return@withContext DownloadState.Done
-        }
-        val app = context.applicationContext
-        val target = dirFor(app, info)
-        val archive = File(downloadDir(app), info.filename)
-        try {
-            // 1) 下载(带 Content-Length 进度)。
-            set(info.id, DownloadState.Downloading(0, 0, info.approxBytes))
-            val conn = URL(info.url).openConnection() as HttpURLConnection
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
-            conn.instanceFollowRedirects = true
-            conn.connect()
-            if (conn.responseCode !in 200..299) {
-                set(info.id, DownloadState.Failed("HTTP ${conn.responseCode}"))
-                return@withContext DownloadState.Failed("HTTP ${conn.responseCode}")
+        downloadMutex.withLock {
+            if (isInstalled(context, info)) {
+                set(info.id, DownloadState.Done)
+                return@withLock DownloadState.Done
             }
-            val total = conn.contentLengthLong.takeIf { it > 0 } ?: info.approxBytes
-            conn.inputStream.use { input ->
-                archive.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    var soFar = 0L
-                    var lastPct = -1
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        soFar += n
-                        val pct = if (total > 0) ((soFar * 100) / total).toInt().coerceIn(0, 100) else 0
-                        if (pct != lastPct) {
-                            lastPct = pct
-                            set(info.id, DownloadState.Downloading(pct, soFar, total))
+            val app = context.applicationContext
+            val target = dirFor(app, info)
+            val archive = File(downloadDir(app), info.filename)
+            val staging = File(modelsRoot(app), "${info.id}.staging")
+            var connection: HttpURLConnection? = null
+            try {
+                currentCoroutineContext().ensureActive()
+                set(info.id, DownloadState.Downloading(0, 0, info.approxBytes))
+                val conn = URL(info.url).openConnection() as HttpURLConnection
+                connection = conn
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 15_000
+                conn.instanceFollowRedirects = true
+                conn.connect()
+                check(conn.responseCode in 200..299) { "HTTP ${conn.responseCode}" }
+                val declaredLength = conn.contentLengthLong
+                val total = declaredLength.takeIf { it > 0 } ?: info.approxBytes
+                conn.inputStream.use { input ->
+                    archive.outputStream().use { out ->
+                        val buffer = ByteArray(64 * 1024)
+                        var soFar = 0L
+                        var lastPct = -1
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            out.write(buffer, 0, n)
+                            soFar += n
+                            val pct = if (total > 0) (soFar * 100 / total).toInt().coerceIn(0, 100) else 0
+                            if (pct != lastPct) {
+                                lastPct = pct
+                                set(info.id, DownloadState.Downloading(pct, soFar, total))
+                            }
                         }
+                        check(declaredLength <= 0 || declaredLength == soFar) { "下载不完整，请重试" }
                     }
                 }
-            }
-
-            // 2) 解包 tar.bz2 到目标目录。
-            set(info.id, DownloadState.Extracting)
-            target.mkdirs()
-            extractTarBz2(archive, target)
-
-            if (isInstalled(app, info)) {
-                archive.delete()
+                currentCoroutineContext().ensureActive()
+                set(info.id, DownloadState.Extracting)
+                staging.deleteRecursively()
+                check(staging.mkdirs()) { "Cannot create staging directory" }
+                extractTarBz2(archive, staging)
+                check(validModelDir(resolveModelDir(staging, info.kind), info.kind)) { "模型包缺少完整权重、tokens 或词典" }
+                currentCoroutineContext().ensureActive()
+                check(!target.exists() || target.deleteRecursively()) { "Cannot replace incomplete model" }
+                check(staging.renameTo(target)) { "Cannot install model" }
                 set(info.id, DownloadState.Done)
                 DownloadState.Done
-            } else {
-                set(info.id, DownloadState.Failed("解包后没找到 tokens + onnx,模型包结构可能变了"))
-                DownloadState.Failed("解包后没找到 tokens + onnx")
+            } catch (e: CancellationException) {
+                set(info.id, DownloadState.Idle)
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Download ${info.id} failed", e)
+                DownloadState.Failed(e.message ?: "下载失败").also { set(info.id, it) }
+            } finally {
+                connection?.disconnect()
+                staging.deleteRecursively()
+                archive.delete()
             }
-        } catch (t: Throwable) {
-            Log.w(TAG, "download ${info.id} failed: ${t.message}")
-            set(info.id, DownloadState.Failed(t.message ?: "下载失败"))
-            DownloadState.Failed(t.message ?: "下载失败")
         }
     }
 
@@ -173,25 +195,36 @@ object VoiceModelManager {
         val dir = dirFor(context, info)
         if (!dir.exists()) return true
         val ok = dir.deleteRecursively()
-        progress.value = progress.value + (info.id to DownloadState.Idle)
+        if (ok) set(info.id, DownloadState.Idle)
         return ok
     }
 
     /** 解包一个 tar.bz2 到 [dest];按 tar entry 逐文件落盘,目录也建。 */
-    private fun extractTarBz2(archive: File, dest: File) {
+    private suspend fun extractTarBz2(archive: File, dest: File) {
+        val root = dest.canonicalFile
         FileInputStream(archive).use { fin ->
             BZip2CompressorInputStream(fin).use { bz ->
                 TarArchiveInputStream(bz).use { tar ->
+                    val buffer = ByteArray(64 * 1024)
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val entry: TarArchiveEntry = tar.nextTarEntry ?: break
                         val out = File(dest, entry.name).canonicalFile
-                        // 防 tar 路径穿越:必须落在 dest 下。
-                        if (!out.path.startsWith(dest.canonicalFile.path)) continue
+                        require(out == root || out.path.startsWith(root.path + File.separator)) { "Unsafe archive path" }
+                        require(!entry.isSymbolicLink && !entry.isLink) { "Archive links are unsupported" }
                         if (entry.isDirectory) {
-                            out.mkdirs()
+                            check(out.isDirectory || out.mkdirs()) { "Cannot create model directory" }
                         } else {
+                            require(entry.isFile && out != root) { "Unsupported archive entry" }
                             out.parentFile?.mkdirs()
-                            out.outputStream().use { tar.copyTo(it) }
+                            out.outputStream().use { output ->
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val n = tar.read(buffer)
+                                    if (n < 0) break
+                                    output.write(buffer, 0, n)
+                                }
+                            }
                         }
                     }
                 }

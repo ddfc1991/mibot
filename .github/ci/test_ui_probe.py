@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Check production XML behavior with adversarial, hand-written hierarchies."""
+import unittest
+from unittest.mock import patch
+
+from ui_probe import ProbeError, Screen, locate, scroll_top
+
+
+class UiProbeTest(unittest.TestCase):
+    def screen(self, nodes):
+        return Screen('<hierarchy><node bounds="[0,0][1080,2400]" enabled="true">' + nodes + '</node></hierarchy>')
+
+    def test_compose_merged_description_and_clickable_parent(self):
+        screen = self.screen('''<node bounds="[40,180][1040,360]" clickable="true" enabled="true">
+          <node content-desc="Mikova WeChat Entry, WeChat channel" bounds="[60,200][300,260]" enabled="true"/>
+          <node text="WeChat" bounds="[60,280][300,330]"/>
+        </node>''')
+        self.assertEqual(screen.lookup('desc', 'Mikova WeChat Entry', True), (180, 230))
+        self.assertIsNone(screen.lookup('desc', 'Mibot WeChat Entry', True))
+
+    def test_invalid_targets_never_tap(self):
+        for attrs in ['enabled="false" bounds="[0,0][100,100]"',
+                      'enabled="true" bounds="[0,0][0,100]"',
+                      'enabled="true" bounds="[1200,0][1300,100]"',
+                      'enabled="true" bounds="[-200,0][-100,100]"',
+                      'enabled="true" bounds="[0,2500][100,2600]"',
+                      'enabled="true" visible-to-user="false" bounds="[0,0][100,100]"']:
+            with self.subTest(attrs=attrs):
+                screen = self.screen(f'<node content-desc="Back" clickable="true" {attrs}/>')
+                self.assertIsNone(screen.lookup('desc', 'Back', True))
+
+    def test_disabled_ancestor_and_nonclickable_text_are_not_targets(self):
+        screen = self.screen('''<node enabled="false" clickable="true" bounds="[0,0][500,500]">
+            <node text="Save" enabled="true" bounds="[0,0][100,100]"/>
+        </node><node text="Title" bounds="[0,600][200,700]"/>''')
+        self.assertIsNone(screen.lookup('text', 'Save', True))
+        self.assertIsNone(screen.lookup('text', 'Title', True))
+
+    def test_correct_title_does_not_hide_placeholder(self):
+        for bad in ['占位', 'Placeholder', '设计稿']:
+            screen = self.screen(f'<node text="WeChat bridge" bounds="[0,0][500,80]"/><node text="{bad}" bounds="[0,100][500,180]"/>')
+            with self.assertRaisesRegex(ProbeError, 'placeholder'):
+                screen.check(texts=['微信接入|WeChat bridge'])
+
+    def test_wrong_page_and_offscreen_title_fail(self):
+        for nodes in ['<node text="Settings" bounds="[0,0][500,80]"/>',
+                      '<node text="Wallet" bounds="[0,2500][500,2580]"/>']:
+            with self.assertRaisesRegex(ProbeError, 'missing page'):
+                self.screen(nodes).check(texts=['钱包|Wallet'])
+
+    def test_visible_chinese_page_with_disabled_controls_can_be_evidence(self):
+        self.screen('''<node text="语音设置" bounds="[0,0][500,80]"/>
+          <node text="系统识别(兜底)" bounds="[0,100][500,180]" enabled="false"/>
+          <node content-desc="Back" bounds="[0,200][50,250]"/>''').check(
+              texts=['语音设置', '系统识别(兜底)'], descs=['Back'])
+
+    def test_draft_belongs_to_expected_input(self):
+        screen = self.screen('''<node content-desc="Mikova Voice Transcript" text="MikovaDraft42" bounds="[0,0][500,200]"/>
+          <node content-desc="Mikova Voice TTS Input" text="other" bounds="[0,220][500,400]"/>''')
+        screen.check(draft=('Mikova Voice Transcript', 'MikovaDraft42'))
+        with self.assertRaisesRegex(ProbeError, 'draft not retained'):
+            screen.check(draft=('Mikova Voice TTS Input', 'MikovaDraft42'))
+
+    def test_malformed_and_empty_xml_fail(self):
+        for xml in ['not xml', '<hierarchy/>']:
+            with self.assertRaises(ProbeError):
+                Screen(xml)
+
+    def test_missing_lookup_has_no_nested_retries(self):
+        screen = self.screen('<node text="Settings" bounds="[0,0][500,80]"/>')
+        with patch('ui_probe.swipe') as gesture:
+            with self.assertRaisesRegex(ProbeError, 'not found'):
+                locate(screen, lambda: screen, 'desc', 'Missing', 10, True)
+            self.assertEqual(gesture.call_count, 1)
+
+    def test_scroll_top_finishes_at_boundary_and_has_hard_cap(self):
+        screen = self.screen('<node text="Settings" bounds="[0,0][500,80]"/>')
+        with patch('ui_probe.swipe') as gesture:
+            self.assertIs(scroll_top(screen, lambda: screen, 12), screen)
+            self.assertEqual(gesture.call_count, 1)
+        counter = iter(range(20))
+        def changing():
+            return self.screen(f'<node text="{next(counter)}" bounds="[0,0][500,80]"/>')
+        with patch('ui_probe.swipe') as gesture:
+            with self.assertRaisesRegex(ProbeError, 'within 3 gestures'):
+                scroll_top(screen, changing, 3)
+            self.assertEqual(gesture.call_count, 3)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

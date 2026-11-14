@@ -715,9 +715,7 @@ fun AppNavigation(
         }
         composable(com.openminis.app.ui.glass.GlassRoutes.IDEAS) {
             com.openminis.app.ui.glass.GlassTabShell(
-                // [destiny/v7] IDEAS has no tab anymore — keep 动态 highlighted
-                // if a deep link still lands on this legacy route.
-                current = com.openminis.app.ui.glass.GlassTab.FEED,
+                current = com.openminis.app.ui.glass.GlassTab.IDEAS,
                 onSelect = { navController.navigateToGlassTab(it) },
                 scrollUnder = true,
             ) {
@@ -816,9 +814,9 @@ fun AppNavigation(
                         taskQueue = go(Routes.MIBOT_TASK_QUEUE),
                         wechat = go(Routes.MIBOT_WECHAT),
                         wallet = go(Routes.MIBOT_WALLET),
-                        selfHost = go("destiny_servers"),
+                        selfHost = go(com.openminis.app.mikova.selfhost.SelfHostRoutes.SCREEN),
                     ),
-                )
+            )
             } else
             SettingsScreen(
                 showBack = !glassOn,

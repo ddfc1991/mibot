@@ -374,6 +374,7 @@ fun MibotRow(
     showDivider: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
     chevron: Boolean = onClick != null,
+    contentDescription: String? = null,
 ) {
     Column {
         Row(
@@ -381,19 +382,9 @@ fun MibotRow(
                 .fillMaxWidth()
                 .heightIn(min = MibotSpace.RowMin)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .then(onClick?.let { callback ->
-                    val desc = when (title) {
-                        "应用连接中心", "应用接入", "Connected apps" -> "Mikova Accounts Entry"
-                        "任务队列", "Task queue" -> "Mikova Task Queue Entry"
-                        "语音", "Voice" -> "Mikova Voice Entry"
-                        "微信", "WeChat" -> "Mikova WeChat Entry"
-                        "钱包", "Wallet" -> "Mikova Wallet Entry"
-                        "自托管服务器", "Self-hosted server" -> "Mikova Self Host Entry"
-                        "后台操控 / 虚拟屏", "Background control" -> "Mikova Virtual Display Entry"
-                        else -> null
-                    }
-                    if (desc == null) Modifier else Modifier.semantics { contentDescription = desc }
-                } ?: Modifier)
+                .then(if (contentDescription == null) Modifier else Modifier.semantics {
+                    this.contentDescription = contentDescription
+                })
                 .padding(horizontal = MibotSpace.M + 2.dp, vertical = MibotSpace.S),
             verticalAlignment = Alignment.CenterVertically,
         ) {
