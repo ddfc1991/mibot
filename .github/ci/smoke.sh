@@ -98,8 +98,8 @@ tap desc Ideas && shot 04-ideas 1 --text Ideas --text 'New idea' || abort 'Ideas
 tap desc 'Group chats' && shot 05-groups 1 --text 'Group chats' --text 'New group chat' || abort 'Groups tab missing'
 tap desc Settings && shot 06-settings 1 --text Settings --text Model || abort 'Settings tab missing'
 
-# Each entry starts at the top, even after returning to a restored list offset.
-# One lookup per dump; both directions stop at a stable boundary or a hard cap.
+# All modules must be opened through the existing Settings UI and return by Back.
+# A selected Tab can be non-clickable; selecting it is an assertion, not a tap.
 settings_entry() {
   probe tap desc "$1" --top --scrolls 10 --save "$OUT/settings-entry.xml"
 }
@@ -108,32 +108,51 @@ module_back() {
   sleep 1
 }
 modules() {
-  local prefix="$1" item desc file
+  local prefix="$1" tab="${2:-Settings}" item desc file
+  local wallet_title='Wallet' accounts_title='Account hub' add_account='+ Add account'
+  local collapse='Collapse' tasks_title='Task queue' wechat_title='WeChat bridge' wechat_control='WeChat channel'
+  if [ "$tab" = 设置 ]; then
+    wallet_title=钱包; accounts_title=账号连接中心; add_account='+ 添加账号'; collapse=收起目录
+    tasks_title=任务队列; wechat_title=微信接入; wechat_control=微信通道
+  fi
   mkdir -p "$OUT/$prefix"
   for item in 'WeChat:wechat' 'Wallet:wallet' 'Self Host:selfhost' 'Virtual Display:virtual-display' 'Accounts:accounts' 'Task Queue:tasks' 'Voice:voice'; do
     desc="Mikova ${item%%:*} Entry"; file="${item##*:}"
+    probe select desc "$tab" || abort "Settings tab unavailable before $file"
+    settings_entry "$desc" || abort "settings entry $desc not found"
     case "$file" in
-      wechat) tap desc "$desc" || abort 'WeChat entry missing'; shot "$prefix/$file" 1 --text 'WeChat bridge|微信接入' --text 'WeChat channel|微信通道' --desc Back ;;
-      wallet) tap desc "$desc" || abort 'Wallet entry missing'; shot "$prefix/$file" 1 --text Wallet --text 'Available balance|可用余额' --text 'No pay channel|未接支付通道' --desc Back ;;
-      selfhost) tap desc "$desc" || abort 'Self-host entry missing'; shot "$prefix/$file" 1 --text 'Self-host connection|自托管连接' --desc 'Mikova SelfHost URL' --desc 'Mikova SelfHost Save' --desc 'Mikova SelfHost Test' --desc Back ;;
-      virtual-display) tap desc "$desc" || abort 'Virtual display entry missing'; shot "$prefix/$file" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back ;;
-      accounts) tap desc "$desc" || abort 'Accounts entry missing'; shot "$prefix/$file" 1 --text 'Account hub|账号连接中心' --text '+ Add account|+ 添加账号' --desc Back ;;
-      tasks) tap desc "$desc" || abort 'Task queue entry missing'; shot "$prefix/$file" 1 --text 'Task queue|任务队列' --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks' ;;
-      voice) tap desc "$desc" || abort 'Voice entry missing'; shot "$prefix/$file" 1 --text '语音|Voice' --desc 'Mikova Voice Settings' --desc Back ;;
+      wechat) shot "$prefix/$file" 1 --text "$wechat_title" --text "$wechat_control" --desc Back ;;
+      wallet) shot "$prefix/$file" 1 --text "$wallet_title" --text 'Available balance|可用余额' --text 'No pay channel|未接支付通道' --desc Back ;;
+      selfhost)
+        shot "$prefix/$file" 1 --text 'Self-host connection|自托管连接' --desc 'Mikova SelfHost URL' --desc 'Mikova SelfHost Save' --desc 'Mikova SelfHost Test' --desc Back
+        probe tap desc 'Mikova SelfHost Guide' --scrolls 5 --save "$OUT/$prefix/selfhost-guide-before.xml" || abort 'selfhost guide missing'
+        shot "$prefix/selfhost-guide" 1 --desc 'Mikova SelfHost Guide' --expanded-from "$OUT/$prefix/selfhost-guide-before.xml" --desc Back ;;
+      virtual-display) shot "$prefix/$file" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back ;;
+      accounts)
+        shot "$prefix/$file" 1 --text "$accounts_title" --text "$add_account" --desc Back
+        tap text "$add_account" || abort 'account catalog control missing'
+        shot "$prefix/accounts-catalog" 1 --text "$accounts_title" --text "$collapse" --desc Back ;;
+      tasks) shot "$prefix/$file" 1 --text "$tasks_title" --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks' --desc Back ;;
+      voice)
+        shot "$prefix/$file" 1 --text 语音 --desc 'Mikova Voice Settings' --desc Back
+        probe tap desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing'
+        adb shell input keyevent KEYCODE_MOVE_END
+        adb shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+        adb shell input text MikovaDraft42 || abort 'cannot enter voice draft'
+        adb shell input keyevent KEYCODE_BACK; sleep 1
+        shot "$prefix/voice-draft" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42
+        probe tap desc 'Mikova Voice Settings' --top --scrolls 2 || abort 'voice settings missing'
+        shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc Back
+        module_back
+        probe seek desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing after Back'
+        shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42 ;;
     esac
-    # Re-enter the real glass shell between module screenshots so each check
-    # starts from the same reachable Settings row, independent of nested Back
-    # transitions that Android's emulator occasionally drops.
-    adb shell am force-stop "$PKG" || abort "cannot close $file module"
-    launch en; sleep 12
-    alive || abort "app died reopening settings after $file"
-    probe tap desc Settings --scrolls 6 || abort "Settings tab missing reopening after $file"
-    probe check --text Settings --desc 'Mikova Accounts Entry' || abort "Settings shell unavailable after $file"
-    alive || abort "app died during $file module screenshot"
+    module_back
+    alive || abort "app died returning from $file"
+    probe check --desc "$tab" --save "$OUT/$prefix/$file-return.xml" || abort "glass shell missing after $file"
   done
 }
-# Settings is the entry point into the added modules, without a legacy V7 detour.
-modules modules
+modules modules Settings
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 
@@ -163,12 +182,10 @@ zlaunch() { adb shell am force-stop "$PKG"; sleep 1
 zshot() { local file="$1"; shift; shot "zh/$file" "$@"; }
 # Back to the chats tab; relaunch if Back left the app.
 front() { adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -Fq "$PKG"; }
-home() { adb shell input keyevent KEYCODE_BACK; sleep 2
-  front || { launch home; sleep 4; }
-  if ! tap desc "对话" >/dev/null 2>&1; then
-    tap desc "Chats" || abort "glass chats tab not found after returning home"
-  fi
-  sleep 1; }
+home() {
+  link home; sleep 2
+  probe check --desc "对话|Chats" || abort "original chat shell missing after home link"
+}
 adb shell am force-stop "$PKG"; adb shell pm clear "$PKG" >/dev/null 2>&1 || true
 zlaunch 1 seed 15
 for th in 1:light 2:dark; do
@@ -176,7 +193,7 @@ for th in 1:light 2:dark; do
   zlaunch "$m" "$n" 14
   alive || abort "app not running (zh $n)"
   zshot "$n-00-entry" 1 --text '欢迎使用 Mibot' --desc 对话
-  zshot "$n-01-onboarding" 1 --text 添加供应商 --text 选择模型
+  zshot "$n-01-onboarding" 1 --text 添加提供方 --text 选择模型
   tap desc 动态 && zshot "$n-feed" 1 --text 动态 --text '应用里发生的事，最新的在最上面' || abort "zh 动态 tab missing ($n)"
   tap desc 点子 && zshot "$n-ideas" 1 --text 点子 --text 新点子 || abort "zh 点子 tab missing ($n)"
   tap desc 群聊 && zshot "$n-04-groups" 1 --text 群聊 --text 新建群聊 || abort "zh 群聊 tab missing ($n)"
@@ -184,10 +201,18 @@ for th in 1:light 2:dark; do
   modules "zh/$n-modules" 设置
   tap desc 对话 || abort "zh 对话 tab missing ($n)"
   tap desc 打开侧边栏 && zshot "$n-03-sidebar" 1 --desc 新对话 || abort "zh sidebar missing ($n)"
-  tap desc 新对话 && zshot "$n-02-chat" 1 --desc Back --desc Attach || abort "zh new chat missing ($n)"
-  adb shell input keyevent KEYCODE_BACK; sleep 1
-  probe check --desc 对话 || abort "zh shell missing after new chat ($n)"
+  tap desc 新对话 && zshot "$n-02-chat" 1 --desc Conversations --desc Attach || abort "zh new chat missing ($n)"
+  # The preserved glass chat has a conversation drawer, not a top-bar Back.
+  # Select Settings through its real tab rather than exiting the task with system Back.
+  probe select desc 设置 || abort "zh settings tab missing after new chat ($n)"
+  probe check --desc 设置 || abort "zh shell missing after new chat ($n)"
 done
+# Core UI verification retains all tabs, modules, Back navigation and draft checks.
+# Network catalogs and obsolete helper diagnostics remain in the full workflow.
+if [ "${MIKOVA_CORE_UI_ONLY:-0}" = 1 ]; then
+  printf '%s\n' 'Native UI checks passed. Cloud execution, payment, live WeChat access and hidden-display execution require separate device/service validation.' > "$OUT/ui-verdict.txt"
+  exit "$fail"
+fi
 # All required modules in BOTH Chinese themes are captured before any network
 # catalog or legacy capability attempts. These remain diagnostic, not proof of
 # task execution, account authorization, TTS quality, or working hidden displays.

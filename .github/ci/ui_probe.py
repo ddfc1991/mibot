@@ -34,21 +34,34 @@ class Screen:
         if not self.nodes:
             raise ProbeError("empty UI hierarchy")
 
-    def visible(self, node, enabled=False):
+    def visible_bounds(self, node, enabled=False):
         x1, y1, x2, y2 = bounds(node)
-        width, height = self.size
-        if x2 <= x1 or y2 <= y1 or min(x2, width) <= max(x1, 0) or min(y2, height) <= max(y1, 0):
-            return False
+        x1, y1 = max(x1, 0), max(y1, 0)
+        x2, y2 = min(x2, self.size[0]), min(y2, self.size[1])
         current = node
         while current is not None:
-            if current.get("visible-to-user") == "false" or (enabled and current.get("enabled") == "false"):
-                return False
-            if current is not node and current.tag == "node":
+            if current.get('visible-to-user') == 'false' or (enabled and current.get('enabled') == 'false'):
+                return None
+            if current is not node and current.tag == 'node':
                 a, b, c, d = bounds(current)
-                if c > a and d > b and (min(x2, c) <= max(x1, a) or min(y2, d) <= max(y1, b)):
-                    return False
+                if c > a and d > b:
+                    x1, y1, x2, y2 = max(x1, a), max(y1, b), min(x2, c), min(y2, d)
             current = self.parents.get(current)
-        return True
+        return (x1, y1, x2, y2) if x2 > x1 and y2 > y1 else None
+
+    def visible(self, node, enabled=False):
+        return self.visible_bounds(node, enabled) is not None
+
+    def selected(self, kind, value):
+        for node in self.nodes:
+            if not self.visible(node, enabled=True) or not self.matches(node, kind, value):
+                continue
+            current = node
+            while current is not None:
+                if current.get('selected') == 'true':
+                    return True
+                current = self.parents.get(current)
+        return False
 
     def matches(self, node, kind, value):
         attr = "content-desc" if kind == "desc" else "text"
@@ -71,8 +84,8 @@ class Screen:
                 if target is None or not self.visible(target, enabled=True):
                     continue
                 # Tap inside the matched child AND its actual clickable parent.
-                a, b, c, d = bounds(node)
-                e, f, g, h = bounds(target)
+                a, b, c, d = self.visible_bounds(node, enabled=True)
+                e, f, g, h = self.visible_bounds(target, enabled=True)
                 x1, y1 = max(a, e, 0), max(b, f, 0)
                 x2, y2 = min(c, g, self.size[0]), min(d, h, self.size[1])
                 if x2 <= x1 or y2 <= y1:
@@ -165,7 +178,7 @@ def locate(screen, refresh, kind, value, limit, click):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("tap", "check", "top", "seek"))
+    parser.add_argument("action", choices=("tap", "check", "top", "seek", "select"))
     parser.add_argument("kind", nargs="?", choices=("desc", "text"))
     parser.add_argument("value", nargs="?")
     parser.add_argument("--xml", type=Path, help="check a saved hierarchy without adb")
@@ -179,8 +192,8 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.scrolls <= 12:
         parser.error("--scrolls must be in 0..12")
-    if args.action in ("tap", "seek") and (not args.kind or not args.value):
-        parser.error("tap/seek requires kind and value")
+    if args.action in ('tap', 'seek', 'select') and (not args.kind or not args.value):
+        parser.error('tap/seek/select requires kind and value')
     if args.xml and args.action != "check":
         parser.error("--xml is only for check")
     size = (1080, 2400)
@@ -200,9 +213,12 @@ def main():
     screen = refresh()
     if args.top or args.action == "top":
         screen = scroll_top(screen, refresh, 12)
-    if args.action in ("tap", "seek"):
-        target = locate(screen, refresh, args.kind, args.value, args.scrolls, args.action == "tap")
-        if args.action == "tap":
+    if args.action == 'select' and screen.selected(args.kind, args.value):
+        print(f'already selected: {args.value}')
+        return
+    if args.action in ('tap', 'seek', 'select'):
+        target = locate(screen, refresh, args.kind, args.value, args.scrolls, args.action != 'seek')
+        if args.action in ('tap', 'select'):
             adb("shell", "input", "tap", str(target[0]), str(target[1]))
         print(f"{args.action}: {args.kind}={args.value}")
     elif args.action == "check":

@@ -1,0 +1,74 @@
+name: Verify existing Mikova APK
+on:
+  push:
+    branches: ["verify/mikova-ui"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: mikova-ui-verify-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  APK_RUN: '43626502203'
+  APK_COMMIT: '7ebcadf5245fb0ae04ffa71447a593dbb89d4c2d'
+jobs:
+  verify:
+    name: Existing APK UI (API ${{ matrix.api }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 31]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify artifact source matches current application code
+        run: |
+          test "$(git rev-parse "${APK_COMMIT}:src/android")" = "$(git rev-parse HEAD:src/android)"
+          test "$(git rev-parse "${APK_COMMIT}:deps")" = "$(git rev-parse HEAD:deps)"
+          python3 .github/ci/test_ui_probe.py
+          bash -n .github/ci/smoke.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: minis-debug-apk
+          run-id: ${{ env.APK_RUN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Record exact APK and test revisions
+        run: |
+          mkdir -p screens
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          p=pathlib.Path('apk/minis-debug.apk')
+          with p.open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
+          pathlib.Path('screens/provenance.json').write_text(json.dumps({'apk_run':os.environ['APK_RUN'],'apk_commit':os.environ['APK_COMMIT'],'test_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'apk_sha256':digest,'scope':'Original five tabs, seven module pages, Back navigation, voice draft, Chinese light/dark. Backend integrations requiring accounts/hardware are not certified.'},indent=2))
+          PY
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Capture and verify real native pages
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          MIKOVA_CORE_UI_ONLY: '1'
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash .github/ci/smoke.sh apk/minis-debug.apk screens
+      - name: Upload real screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-ui-api${{ matrix.api }}
+          path: screens/
+          retention-days: 14

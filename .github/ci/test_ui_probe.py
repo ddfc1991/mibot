@@ -18,6 +18,22 @@ class UiProbeTest(unittest.TestCase):
         self.assertEqual(screen.lookup('desc', 'Mikova WeChat Entry', True), (180, 230))
         self.assertIsNone(screen.lookup('desc', 'Mibot WeChat Entry', True))
 
+    def test_selected_tab_is_not_an_actionable_button(self):
+        screen = self.screen('''<node selected="true" clickable="false" bounds="[845,2096][1048,2248]">
+          <node content-desc="Settings" bounds="[845,2096][1048,2248]"/>
+        </node>''')
+        self.assertTrue(screen.selected('desc', 'Settings'))
+        self.assertIsNone(screen.lookup('desc', 'Settings', True))
+        self.assertFalse(screen.selected('desc', 'Chats'))
+
+    def test_click_uses_visible_parent_intersection_not_raw_center(self):
+        screen = self.screen('''<node scrollable="true" bounds="[0,0][1080,1800]">
+          <node clickable="true" bounds="[20,1700][1060,2300]">
+            <node content-desc="Below fold" bounds="[20,1700][1060,2300]"/>
+          </node>
+        </node>''')
+        self.assertEqual(screen.lookup('desc', 'Below fold', True), (540, 1750))
+
     def test_invalid_targets_never_tap(self):
         for attrs in ['enabled="false" bounds="[0,0][100,100]"',
                       'enabled="true" bounds="[0,0][0,100]"',
