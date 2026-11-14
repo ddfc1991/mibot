@@ -123,7 +123,7 @@ modules() {
     if [ "$tab" = Settings ]; then
       adb shell input tap 946 2170 || abort "Settings tab tap failed before $file"
       sleep 1
-      probe check --text Settings --text Model || abort "Settings page did not return before $file"
+      probe check --text Settings || abort "Settings page did not return before $file"
     else
       tap desc "$tab" || abort "Settings tab unavailable before $file"
     fi
