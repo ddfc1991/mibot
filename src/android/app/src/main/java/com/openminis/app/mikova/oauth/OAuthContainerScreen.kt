@@ -95,7 +95,8 @@ fun OAuthContainerScreen(
     var captured by remember { mutableStateOf<com.openminis.app.mibot.vault.Pkce.Callback?>(null) }
     var webRef by remember { mutableStateOf<WebView?>(null) }
 
-    // oauth 模式：进入即生成授权 URL + 留存 verifier。
+    // Google OAuth blocks embedded WebViews. Never display its broken in-app
+    // authorization page; use the existing Custom Tab + loopback callback flow.
     LaunchedEffect(serviceId, mode) {
         if (mode == OAuthMode.OAUTH) {
             val p = provider
@@ -103,13 +104,25 @@ fun OAuthContainerScreen(
                 status = "未配置该服务的 OAuth 接入"
                 return@LaunchedEffect
             }
-            if (p.clientId.startsWith("<PH:")) {
-                status = "缺少 clientId（<PH:${p.id.uppercase()}_CLIENT_ID>），见 INTEGRATION.md"
+            if (p.clientId.startsWith("<PH:") || p.clientSecret?.startsWith("<PH:") == true) {
+                status = "登录尚未配置：缺少 ${p.id.uppercase()} OAuth 应用凭据。普通 WebView OAuth 不会成功。"
+                return@LaunchedEffect
+            }
+            if (p.authorizeUrl.contains("accounts.google.com", ignoreCase = true)) {
+                status = "Google 不允许在应用内登录，正在通过系统浏览器打开…"
+                runCatching {
+                    val account = broker.runLoopbackFlow(p, onStep = { status = it })
+                    Toast.makeText(ctx, connectedMsg, Toast.LENGTH_SHORT).show()
+                    onBack()
+                }.onFailure { error ->
+                    status = "系统浏览器授权失败：${error.message ?: error.javaClass.simpleName}。账号和密钥未改变。"
+                }
+                return@LaunchedEffect
             }
             val (url, ver) = broker.beginAuthorize(p)
-            initialUrl = url
-            address = url
             verifier = ver
+            address = url
+            initialUrl = url
             status = "已加载授权页，请在页面里登录并点「授权」"
         } else {
             status = "在地址栏打开登录页，登录后点下方「我已登录，捕获凭据」"
