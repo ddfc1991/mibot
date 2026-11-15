@@ -264,7 +264,7 @@ fun VoiceSettingsScreen(
                     )
                     MibotButton(
                         text = "系统文字转语音设置",
-                        onClick = { openSystemSetting(Settings.ACTION_TEXT_TO_SPEECH_SETTINGS, "文字转语音") },
+                        onClick = { openSystemSetting("com.android.settings.TTS_SETTINGS", "文字转语音") },
                         tonal = true,
                         modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                             .semantics { contentDescription = "Mikova System TTS Settings" },
