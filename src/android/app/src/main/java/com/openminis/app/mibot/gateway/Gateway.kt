@@ -507,8 +507,42 @@ fun GatewayScreen(onBack: () -> Unit, onProvider: (String) -> Unit, onModelGroup
                 Icons.Outlined.AccountTree, MibotTokens.Slate, onClick = onModelGroups, showDivider = true)
             MibotRow(t("Token 用量", "Token usage"), t("按服务商统计请求与 Token", "Requests and tokens per provider"),
                 Icons.Outlined.BarChart, MibotTokens.Green, onClick = onUsage, showDivider = true)
-            MibotRow(t("本地 OpenAI 兼容端点", "Local OpenAI-compatible endpoint"), "127.0.0.1 · " + t("即将支持", "coming soon"),
-                Icons.Outlined.Dns, MibotTokens.Steel, chevron = false, trailing = { StatusChip(t("即将支持", "Soon"), ChipKind.NEUTRAL) })
+            // 本地 OpenAI 兼容端点：真正可开关的本地网关（非占位）
+            val gwRunning = LocalGateway.isRunning
+            val gwPort = LocalGateway.currentPort
+            val gwErr = LocalGateway.lastError
+            MibotRow(
+                t("本地 OpenAI 兼容端点", "Local OpenAI-compatible endpoint"),
+                buildString {
+                    append("127.0.0.1:").append(gwPort)
+                    if (gwRunning) append(" · ").append(LocalGateway.modelCount.get()).append(" 模型")
+                    else gwErr?.let { append(" · ").append(it.take(48)) }
+                },
+                Icons.Outlined.Dns, MibotTokens.Steel,
+                chevron = false,
+                trailing = {
+                    StatusChip(
+                        if (gwRunning) t("运行中", "Running") else t("已停止", "Stopped"),
+                        if (gwRunning) ChipKind.OK else ChipKind.NEUTRAL,
+                    )
+                },
+            )
+            Row(Modifier.fillMaxWidth().padding(start = 70.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (gwRunning) {
+                    SmallAction(t("停止", "Stop")) {
+                        LocalGateway.stop()
+                        scope.launch { now = System.currentTimeMillis() }
+                    }
+                } else {
+                    SmallAction(t("启动", "Start")) {
+                        val ok = runCatching { LocalGateway.start(ctx) }.getOrDefault(false)
+                        if (!ok) {
+                            android.widget.Toast.makeText(ctx, LocalGateway.lastError ?: "启动失败", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        scope.launch { now = System.currentTimeMillis() }
+                    }
+                }
+            }
         }
     }
 }

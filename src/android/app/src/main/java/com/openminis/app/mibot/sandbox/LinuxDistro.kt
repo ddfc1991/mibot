@@ -188,7 +188,8 @@ object LinuxDistros {
                     "https://mirrors.aliyun.com/alpine"
                 )
                 for (prefix in prefixes) {
-                    val content = get("$prefix/latest-stable/releases/aarch64/latest-releases.yaml")
+                    // 单个镜像失败(如 403/超时)不拖垮整个安装:跳过继续下一个镜像
+                    val content = runCatching { get("$prefix/latest-stable/releases/aarch64/latest-releases.yaml") }.getOrNull() ?: continue
                     val file = last(content, "alpine-minirootfs-[0-9.]+-aarch64\\.tar\\.gz") ?: continue
                     result.add("$prefix/latest-stable/releases/aarch64/$file")
                 }
@@ -200,7 +201,8 @@ object LinuxDistros {
                     "https://mirrors.aliyun.com/ubuntu-cdimage"
                 )
                 for (prefix in prefixes) {
-                    val content = get("$prefix/ubuntu-base/releases/24.04/release/")
+                    // 单个镜像失败(如 403/超时)不拖垮整个安装:跳过继续下一个镜像
+                    val content = runCatching { get("$prefix/ubuntu-base/releases/24.04/release/") }.getOrNull() ?: continue
                     val file = last(content, "ubuntu-base-24\\.04(\\.[0-9]+)?-base-arm64\\.tar\\.gz") ?: continue
                     result.add("$prefix/ubuntu-base/releases/24.04/release/$file")
                 }
@@ -212,7 +214,8 @@ object LinuxDistros {
                     "https://mirrors.cernet.edu.cn/lxc-images"
                 )
                 for (prefix in prefixes) {
-                    val content = get("$prefix/images/debian/trixie/arm64/default/")
+                    // 单个镜像失败(如 403/超时)不拖垮整个安装:跳过继续下一个镜像
+                    val content = runCatching { get("$prefix/images/debian/trixie/arm64/default/") }.getOrNull() ?: continue
                     val stamp = last(content, "20[0-9]{6}_[0-9]{2}:[0-9]{2}") ?: continue
                     result.add("$prefix/images/debian/trixie/arm64/default/$stamp/rootfs.tar.xz")
                 }
