@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.openminis.app.mibot.design.ChipKind
@@ -74,6 +76,16 @@ fun VoiceSettingsScreen(
     var deleteCandidate by remember { mutableStateOf<VoiceModelInfo?>(null) }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
+    // 系统识别服务的具体不可用原因;空 = 可用。sherpa 通常不可用,此诊断对两条引擎链都适用。
+    val recognitionIssue by remember(ctx) { mutableStateOf(PlatformVoiceEngine.recognitionBlockers(ctx).firstOrNull()) }
+    fun openSystemSetting(action: String, label: String) {
+        try {
+            ctx.startActivity(Intent(action))
+        } catch (_: Exception) {
+            try { ctx.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            catch (_: Exception) { deleteError = "无法打开系统$label设置" }
+        }
+    }
     LaunchedEffect(Unit) {
         nativeReady = withContext(Dispatchers.IO) { SherpaVoiceEngine.isNativeLoaded() }
         refreshInstalled()
@@ -229,6 +241,35 @@ fun VoiceSettingsScreen(
         }
 
         Spacer(Modifier.height(MibotSpace.M))
+        MibotSectionHeader("系统语音服务")
+        MibotCard {
+            Column(Modifier.padding(vertical = MibotSpace.S)) {
+                Text(
+                    if (recognitionIssue == null) "系统识别服务可用；朗读与识别是否联网取决于所选系统服务。"
+                    else recognitionIssue!!,
+                    fontSize = MibotType.Secondary,
+                    color = if (recognitionIssue == null) MaterialTheme.colorScheme.onSurfaceVariant else MibotTokens.errColor(),
+                )
+                Spacer(Modifier.height(MibotSpace.S))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MibotButton(
+                        text = "系统语音输入设置",
+                        onClick = { openSystemSetting(Settings.ACTION_VOICE_INPUT_SETTINGS, "语音输入") },
+                        tonal = true,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                            .semantics { contentDescription = "Mikova System Voice Settings" },
+                    )
+                    MibotButton(
+                        text = "系统文字转语音设置",
+                        onClick = { openSystemSetting(Settings.ACTION_TEXT_TO_SPEECH_SETTINGS, "文字转语音") },
+                        tonal = true,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                            .semantics { contentDescription = "Mikova System TTS Settings" },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(MibotSpace.M))
         MibotFootnote(
             "模型来自 k2-fsa/sherpa-onnx 官方 Releases，下载到应用私有目录。两包共约 542.8MB，解包需更多空间，建议 Wi-Fi。sherpa-onnx 代码许可为 Apache-2.0；模型许可独立。",
         )
@@ -255,6 +296,11 @@ private fun ProgressBar(percent: Int) {
                 .weight(frac.coerceAtLeast(0.01f))
                 .height(6.dp)
                 .frosted(RoundedCornerShape(50), FrostLevel.Card, border = false, tint = MibotTokens.accent()),
+        )
+        Spacer(Modifier.weight((1f - frac).coerceAtLeast(0.001f)))
+    }
+}
+cent()),
         )
         Spacer(Modifier.weight((1f - frac).coerceAtLeast(0.001f)))
     }

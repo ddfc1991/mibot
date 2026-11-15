@@ -6,11 +6,13 @@ sourceSets {
     main {
         kotlin.srcDir(File(appRoot, "main/java"))
         kotlin.include("com/openminis/app/mikova/voice/PcmPlayback.kt")
+        kotlin.include("com/openminis/app/mikova/voice/VoiceDiagnostics.kt")
         kotlin.include("com/openminis/app/mikova/selfhost/EndpointPolicy.kt")
     }
     test {
         kotlin.srcDir(File(appRoot, "test/java"))
         kotlin.include("com/openminis/app/mikova/voice/PcmPlaybackTest.kt")
+        kotlin.include("com/openminis/app/mikova/voice/VoiceDiagnosticsTest.kt")
         kotlin.include("com/openminis/app/mikova/selfhost/SelfHostProbeTest.kt")
     }
 }

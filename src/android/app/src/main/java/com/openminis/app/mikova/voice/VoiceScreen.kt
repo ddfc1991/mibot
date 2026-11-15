@@ -2,7 +2,9 @@ package com.openminis.app.mikova.voice
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -19,6 +21,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.openminis.app.mibot.design.*
+import com.openminis.app.ui.glass.FrostLevel
 import com.openminis.app.ui.glass.LocalGlassBottomInset
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -111,6 +114,20 @@ fun VoiceScreen(
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         status = if (granted) "麦克风权限已开启，点按声场开始聆听。" else "麦克风权限未开启，原文字已保留；可到设置开启后重试。"
     }
+    // 系统识别服务的具体不可用原因(空 = 可用);sherpa 降级时同样反映系统识别实况。
+    val recognitionIssue = remember(context) {
+        PlatformVoiceEngine.recognitionBlockers(context).firstOrNull()
+    }
+    val recorderPerm = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    fun openSystemVoiceSettings() {
+        val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+        try {
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            catch (_: Exception) { status = "无法打开系统语音设置，请到 系统设置→语言与输入→语音输入 手动设置。" }
+        }
+    }
     fun toggleListening() {
         if (listening) {
             listening = false; decoding = true; level = -60f; balance = null
@@ -120,11 +137,12 @@ fun VoiceScreen(
         }
         stopOutput()
         cancelInput()
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!recorderPerm) {
             permission.launch(Manifest.permission.RECORD_AUDIO); return
         }
         if (!engine.isAvailable) {
-            status = "当前识别引擎不可用，打开右上角设置检查语音服务或离线模型。"; return
+            status = recognitionIssue
+                ?: "当前识别引擎不可用，打开右上角设置检查语音服务或离线模型。"; return
         }
         val epoch = ++listenEpoch
         val listener = object : VoiceEngine.Listener {
@@ -215,6 +233,20 @@ fun VoiceScreen(
         )
         if (status.isNotBlank()) Text(status, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
             fontSize = MibotType.Secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (recognitionIssue != null) {
+            MibotCard(padding = PaddingValues(14.dp), frostLevel = FrostLevel.Content) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("语音识别未就绪", fontSize = MibotType.Secondary, fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text(recognitionIssue, fontSize = MibotType.Secondary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(
+                        onClick = { openSystemVoiceSettings() },
+                        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Mikova Voice System Settings" },
+                    ) { Text("去系统语音设置") }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
         MibotSectionHeader("识别文字")
         MibotCard(padding = PaddingValues(16.dp)) {
             OutlinedTextField(

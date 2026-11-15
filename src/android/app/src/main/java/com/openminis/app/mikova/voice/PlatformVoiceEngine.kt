@@ -2,9 +2,11 @@ package com.openminis.app.mikova.voice
 
 import android.content.Context
 import android.content.Intent
+import android.content.ComponentName
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -68,7 +70,10 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
     override val outputLevel get() = playback.outputLevel
 
     override val isAvailable: Boolean
-        get() = !closed.get() && !degraded && SpeechRecognizer.isRecognitionAvailable(appContext)
+        get() = !closed.get() && !degraded && currentBlockers().isEmpty()
+
+    /** 识别不可用的具体原因(最多一条主因);空列表 = 可用。 */
+    private fun currentBlockers(): List<String> = recognitionBlockers(appContext)
 
     override fun ttsVoices(context: Context): List<TtsVoiceChoice> {
         if (!closed.get() && loadingVoices.compareAndSet(false, true)) {
@@ -114,7 +119,10 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
             if (!listenGeneration.isCurrent(token)) return@post
             destroyRecognizer()
             if (!isAvailable) {
-                listener.onError(VoiceEngine.VoiceError.UNAVAILABLE, "这台设备不支持语音识别；系统朗读仍可单独使用")
+                listener.onError(
+                    VoiceEngine.VoiceError.UNAVAILABLE,
+                    currentBlockers().firstOrNull() ?: "语音识别不可用；系统朗读仍可单独使用",
+                )
                 return@post
             }
             try {
@@ -327,5 +335,37 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
 
     private companion object {
         const val TAG = "PlatformVoice"
+
+        /**
+         * 逐层检查平台语音识别为什么不可用,产出用户能看懂的中文原因。
+         * 空列表表示可以开始识别。真机上最常见的坑是“装了识别服务但系统
+         * 默认服务没设置”——此时 SpeechRecognizer 一点就 ERROR_CLIENT,
+         * 这里把原因精确到设置项,界面据此给出一键跳转(ACTION_VOICE_INPUT_SETTINGS)。
+         */
+        @JvmStatic
+        fun recognitionBlockers(context: Context): List<String> {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                return listOf("系统未安装任何语音识别服务")
+            }
+            val raw = runCatching {
+                Settings.Secure.getString(context.contentResolver, Settings.Secure.VOICE_RECOGNITION_SERVICE)
+            }.getOrNull()
+            val state = VoiceDiagnostics.parseDefaultService(raw)
+            VoiceDiagnostics.reason(state)?.let { return listOf(it) }
+            if (state is DefaultRecognitionService.Configured) {
+                val pm = context.packageManager
+                val alive = runCatching {
+                    if (state.className != null) {
+                        pm.getServiceInfo(ComponentName(state.packageName, state.className), 0)
+                    } else {
+                        pm.getApplicationInfo(state.packageName, 0)
+                    }
+                }.isSuccess
+                if (!alive) {
+                    return listOf("系统默认语音识别服务已失效（组件被卸载或停用），请到系统语音输入设置重新选择")
+                }
+            }
+            return emptyList()
+        }
     }
 }

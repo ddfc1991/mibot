@@ -135,6 +135,23 @@ modules() {
       tasks) shot "$prefix/$file" 1 --text "$tasks_title" --desc 'Mibot Task Queue' --desc 'Mibot New Task' --desc 'Mibot Scheduled Tasks' --desc Back ;;
       voice)
         shot "$prefix/$file" 1 --text 语音 --desc 'Mikova Voice Settings' --desc Back
+        # Real listen interaction: permission is pre-granted by -g; the emulator may
+        # or may not have a default recognition service. Tap the field, wait, screenshot
+        # whichever state (listening / diagnosis / permission) without failing the run.
+        probe tap desc 'Mikova Voice Mic' --scrolls 2 || echo "::warning::voice mic not found"
+        sleep 3
+        shot "$prefix/voice-listen" 1 || true
+        probe tap desc 'Mikova Voice Mic' --scrolls 2 || true
+        sleep 2
+        shot "$prefix/voice-listen-end" 1 || true
+        # Real read-aloud interaction over the TTS field.
+        probe tap desc 'Mikova Voice TTS Input' --scrolls 2 || echo "::warning::voice tts input not found"
+        adb shell input keyevent KEYCODE_MOVE_END
+        adb shell input text MikovaTTS01 || echo "::warning::cannot enter tts text"
+        adb shell input keyevent KEYCODE_BACK; sleep 1
+        probe tap desc 'Mikova Voice Speak' --scrolls 2 || echo "::warning::voice speak not found"
+        sleep 5
+        shot "$prefix/voice-speak" 1 || true
         probe tap desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing'
         adb shell input keyevent KEYCODE_MOVE_END
         adb shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
@@ -142,7 +159,7 @@ modules() {
         adb shell input keyevent KEYCODE_BACK; sleep 1
         shot "$prefix/voice-draft" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42
         probe tap desc 'Mikova Voice Settings' --top --scrolls 2 || abort 'voice settings missing'
-        shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc Back
+        shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc 'Mikova System Voice Settings' --desc 'Mikova System TTS Settings' --desc Back
         module_back
         probe seek desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing after Back'
         shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42 ;;
