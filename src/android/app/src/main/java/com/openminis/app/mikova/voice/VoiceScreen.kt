@@ -222,12 +222,11 @@ fun VoiceScreen(
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
             TextButton(
                 onClick = {
-                    val ctx = LocalContext.current
-                    if (!FloatingVoiceOverlay.canShow(ctx)) {
+                    if (!FloatingVoiceOverlay.canShow(context)) {
                         status = "需先允许悬浮窗权限，才能显示浮层语音。"
                         leave(onOpenSettings)
                     } else {
-                        FloatingVoiceOverlay.show(ctx)
+                        FloatingVoiceOverlay.show(context)
                         status = "浮层语音已显示；回到桌面即可使用。"
                     }
                 },

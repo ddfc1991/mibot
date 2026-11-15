@@ -67,7 +67,7 @@ object FloatingVoiceController {
         engine = VoiceEngineFactory.build(VoiceEngineId.PLATFORM, app)
         _modelPath.value = describeModel(app)
         seedGreeting()
-        ensureSession()
+        scope.launch { ensureSession() }
     }
 
     private fun seedGreeting() {
@@ -188,8 +188,8 @@ object FloatingVoiceController {
         return try {
             val app = ctx.applicationContext as? com.openminis.app.MinisApp
             val entry = app?.providerRepository?.allVisibleEntries()?.firstOrNull()
-            val model = entry?.baseModel?.id ?: entry?.displayName
-            val provider = entry?.displayName
+            val model = entry?.baseModel?.id
+            val provider = entry?.baseModel?.displayName ?: entry?.providerInstanceId
             listOfNotNull(provider, model).joinToString(" · ").ifBlank { "未配置模型" }
         } catch (_: Throwable) { "未配置模型" }
     }
