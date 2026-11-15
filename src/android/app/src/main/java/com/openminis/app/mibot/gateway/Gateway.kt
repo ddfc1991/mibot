@@ -38,9 +38,11 @@ import com.openminis.app.mibot.design.MibotSectionHeader
 import com.openminis.app.mibot.design.MibotTokens
 import com.openminis.app.mibot.design.StatusChip
 import com.openminis.app.mibot.design.t
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -509,14 +511,22 @@ fun GatewayScreen(onBack: () -> Unit, onProvider: (String) -> Unit, onModelGroup
                 Icons.Outlined.BarChart, MibotTokens.Green, onClick = onUsage, showDivider = true)
             // 本地 OpenAI 兼容端点：真正可开关的本地网关（非占位）
             val gwRunning = LocalGateway.isRunning
+            val gwHost = LocalGateway.boundHost
             val gwPort = LocalGateway.currentPort
             val gwErr = LocalGateway.lastError
+            val gwNote = LocalGateway.bindNote
+            val gwModels = LocalGateway.modelCount.get()
+            var gwStarting by remember { mutableStateOf(false) }
             MibotRow(
                 t("本地 OpenAI 兼容端点", "Local OpenAI-compatible endpoint"),
                 buildString {
-                    append("127.0.0.1:").append(gwPort)
-                    if (gwRunning) append(" · ").append(LocalGateway.modelCount.get()).append(" 模型")
-                    else gwErr?.let { append(" · ").append(it.take(48)) }
+                    // 完整展示实际绑定的 base URL（发生端口回退也如实显示）
+                    append("http://").append(gwHost).append(":").append(gwPort).append("/v1")
+                    if (gwRunning) {
+                        append(" · ").append(gwModels).append(" 模型")
+                        if (gwModels == 0) append(" · ").append(t("需先添加服务商", "add a provider first"))
+                        gwNote?.let { append(" · ").append(it) }
+                    } else gwErr?.let { append(" · ").append(it.take(48)) }
                 },
                 Icons.Outlined.Dns, MibotTokens.Steel,
                 chevron = false,
@@ -528,18 +538,28 @@ fun GatewayScreen(onBack: () -> Unit, onProvider: (String) -> Unit, onModelGroup
                 },
             )
             Row(Modifier.fillMaxWidth().padding(start = 70.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallAction(t("复制地址", "Copy URL")) {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("mibot-gateway", "http://${LocalGateway.boundHost}:${LocalGateway.currentPort}/v1"))
+                    android.widget.Toast.makeText(ctx, t("已复制", "Copied"), android.widget.Toast.LENGTH_SHORT).show()
+                }
                 if (gwRunning) {
                     SmallAction(t("停止", "Stop")) {
                         LocalGateway.stop()
                         scope.launch { now = System.currentTimeMillis() }
                     }
                 } else {
-                    SmallAction(t("启动", "Start")) {
-                        val ok = runCatching { LocalGateway.start(ctx) }.getOrDefault(false)
-                        if (!ok) {
-                            android.widget.Toast.makeText(ctx, LocalGateway.lastError ?: "启动失败", android.widget.Toast.LENGTH_SHORT).show()
+                    SmallAction(if (gwStarting) t("启动中…", "Starting…") else t("启动", "Start"), enabled = !gwStarting) {
+                        // 绑定 / 配置读取可能涉及 IO，不能卡住主线程
+                        gwStarting = true
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) { runCatching { LocalGateway.start(ctx) }.getOrDefault(false) }
+                            gwStarting = false
+                            if (!ok) {
+                                android.widget.Toast.makeText(ctx, LocalGateway.lastError ?: "启动失败", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                            now = System.currentTimeMillis()
                         }
-                        scope.launch { now = System.currentTimeMillis() }
                     }
                 }
             }

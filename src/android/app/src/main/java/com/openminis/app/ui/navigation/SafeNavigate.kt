@@ -32,8 +32,24 @@ fun NavController.safeNavigate(
     route: String,
     builder: (NavOptionsBuilder.() -> Unit)? = null,
 ) {
-    if (currentBackStackEntry?.lifecycle?.currentState != Lifecycle.State.RESUMED) return
-    if (builder != null) navigate(route, builder) else navigate(route)
+    val lifecycle = currentBackStackEntry?.lifecycle?.currentState
+    val details = mapOf(
+        "from" to com.openminis.app.diagnostics.BugJournal.routeName(currentDestination?.route),
+        "to" to com.openminis.app.diagnostics.BugJournal.routeName(route),
+        "lifecycle" to (lifecycle?.name ?: "unknown"),
+    )
+    if (lifecycle != Lifecycle.State.RESUMED) {
+        com.openminis.app.diagnostics.BugJournal.event("navigation.blocked", details)
+        return
+    }
+    com.openminis.app.diagnostics.BugJournal.event("navigation.request", details)
+    try {
+        if (builder != null) navigate(route, builder) else navigate(route)
+        com.openminis.app.diagnostics.BugJournal.event("navigation.accepted", details)
+    } catch (error: Exception) {
+        com.openminis.app.diagnostics.BugJournal.event("navigation.failed", details, error)
+        throw error
+    }
 }
 
 /**

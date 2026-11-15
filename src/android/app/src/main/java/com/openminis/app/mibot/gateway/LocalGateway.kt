@@ -36,11 +36,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStream
-import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLEncoder
 import java.util.concurrent.Executors
@@ -60,69 +56,115 @@ object LocalGateway {
 
     private val running = AtomicBoolean(false)
     private val port = AtomicReference(DEFAULT_PORT)
+    private val host = AtomicReference("127.0.0.1")
+    private val bindNoteRef = AtomicReference("")
     private val error = AtomicReference<String?>(null)
-    private var serverThread: Thread? = null
-    private var serverSocket: ServerSocket? = null
+    @Volatile private var listener: GatewayListener? = null
     private val pool = Executors.newCachedThreadPool { r ->
         Thread(r, "LocalGateway").apply { isDaemon = true }
     }
 
     val isRunning: Boolean get() = running.get()
+    /** 实际绑定端口（发生回退后可能与请求端口不同）。 */
     val currentPort: Int get() = port.get()
+    /** 实际绑定地址（仅回环 127.0.0.1）。 */
+    val boundHost: String get() = host.get()
+    /** 端口冲突 / 回退说明；无冲突时为 null。 */
+    val bindNote: String? get() = bindNoteRef.get().takeIf { it.isNotEmpty() }
     val lastError: String? get() = error.get()
 
     /** 已启动的模型数（用于 UI 显示），启动时刷新。 */
     val modelCount = AtomicReference(0)
-    /** 启动网关。绑定失败时抛异常（调用方捕获并展示 [lastError]）。 */
+    /**
+     * 启动网关。desiredPort 被占用时自动回退到后续端口 / 系统分配端口（见
+     * [GatewayListener]），绝不触碰已监听该端口的其它服务；实际绑定端口经
+     * [currentPort]/[boundHost]，冲突说明经 [bindNote] 暴露给 UI。
+     * 绑定与配置读取可能涉及 IO，调用方应放在 IO 线程（UI 层用 Dispatchers.IO）。
+     */
     @Synchronized
     fun start(context: Context, desiredPort: Int = DEFAULT_PORT): Boolean {
+        com.openminis.app.diagnostics.BugJournal.event(
+            "gateway.start_requested",
+            mapOf("preferredPort" to desiredPort.toString()),
+        )
         if (running.get()) return true
         val app = context.applicationContext as? MinisApp
         val repo = app?.providerRepositoryOrNull
         if (repo == null) {
             error.set("AI 网关未就绪（provider 仓库未初始化）")
+            com.openminis.app.diagnostics.BugJournal.event(
+                "gateway.start_failed",
+                mapOf(
+                    "preferredPort" to desiredPort.toString(),
+                    "outcome" to "error",
+                    "reason" to "provider_repo_unavailable",
+                ),
+            )
             return false
         }
-        return try {
-            val sock = ServerSocket()
-            sock.reuseAddress = true
-            sock.bind(InetSocketAddress("127.0.0.1", desiredPort), 32)
-            port.set(desiredPort)
-            serverSocket = sock
-            running.set(true)
-            error.set(null)
-            // 启动时统计可用模型数
-            runCatching { repo.ensureConfigLoaded() }
-            modelCount.set(repo.config.value.modelEntries.count { !it.isHidden })
-            serverThread = Thread {
-                try {
-                    while (running.get()) {
-                        val client = try { sock.accept() } catch (e: Exception) { break }
-                        pool.execute { handleClient(app, repo, client) }
-                    }
-                } catch (e: Exception) {
-                    if (running.get()) { error.set(e.message); running.set(false) }
-                } finally {
-                    runCatching { sock.close() }
-                }
-            }.apply { isDaemon = true; name = "LocalGateway-Accept" }
-            serverThread?.start()
-            Log.i(TAG, "started on 127.0.0.1:$desiredPort")
-            true
+        val l = try {
+            GatewayListener.bind(
+                "127.0.0.1", desiredPort,
+                acceptExecutor = pool,
+                onAccept = { client -> handleClient(app, repo, client) },
+            )
         } catch (e: Exception) {
             error.set("启动失败：${e.message ?: e.javaClass.simpleName}")
             running.set(false)
-            false
+            com.openminis.app.diagnostics.BugJournal.event(
+                "gateway.start_failed",
+                mapOf(
+                    "preferredPort" to desiredPort.toString(),
+                    "outcome" to "error",
+                    "reason" to if (e is java.net.BindException) "port_unavailable" else "bind_error",
+                ),
+                e,
+            )
+            return false
         }
+        port.set(l.port)
+        host.set(l.host)
+        bindNoteRef.set(l.note)
+        error.set(null)
+        running.set(true)
+        listener = l
+        // 启动时统计可用模型数（0 provider / 0 模型也允许启动，UI 提示“需先添加服务商”）
+        runCatching { repo.ensureConfigLoaded() }
+        modelCount.set(repo.config.value.modelEntries.count { !it.isHidden })
+        l.start { msg ->
+            // 只有自己仍是当前监听器时才改状态：旧实例的 accept 线程（若因 stop/restart
+            // 遗留）不得把新实例标记成停止。
+            if (listener === l) {
+                Log.w(TAG, "accept loop died: $msg")
+                error.set("监听异常：$msg")
+                running.set(false)
+            }
+        }
+        com.openminis.app.diagnostics.BugJournal.event(
+            "gateway.started",
+            mapOf(
+                "preferredPort" to desiredPort.toString(),
+                "port" to l.port.toString(),
+                "models" to modelCount.get().toString(),
+                "outcome" to if (l.fallbackUsed) "fallback" else "ok",
+            ),
+        )
+        Log.i(TAG, "started on ${l.host}:${l.port}" + if (l.note.isNotEmpty()) "（${l.note}）" else "")
+        return true
     }
 
-    /** 停止网关。 */
+    /** 停止网关。幂等；旧监听器的 accept 线程不会影响之后的新实例。 */
     @Synchronized
     fun stop() {
+        val stoppingPort = port.get()
         running.set(false)
-        runCatching { serverSocket?.close() }
-        serverSocket = null
-        serverThread = null
+        val l = listener
+        listener = null
+        l?.close()
+        com.openminis.app.diagnostics.BugJournal.event(
+            "gateway.stopped",
+            mapOf("port" to stoppingPort.toString(), "outcome" to "stopped"),
+        )
         Log.i(TAG, "stopped")
     }
 
@@ -133,49 +175,29 @@ object LocalGateway {
     private fun handleClient(app: MinisApp?, repo: com.openminis.app.data.repository.ProviderRepository, client: Socket) {
         try {
             client.soTimeout = 60_000
-            val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
+            val input = client.getInputStream()
             val out = client.getOutputStream()
 
-            val requestLine = reader.readLine() ?: return
-            val parts = requestLine.split(" ")
-            if (parts.size < 2) { writeError(out, 400, "bad request line"); return }
-            val method = parts[0]
-            val path = parts[1].substringBefore('?')
-
-            // 读请求头
-            val headers = LinkedHashMap<String, String>()
-            var contentLength = 0
-            var line: String?
-            while (true) {
-                line = reader.readLine() ?: break
-                if (line.isBlank()) break
-                val idx = line.indexOf(':')
-                if (idx > 0) {
-                    val k = line.substring(0, idx).trim().lowercase()
-                    val v = line.substring(idx + 1).trim()
-                    headers[k] = v
-                    if (k == "content-length") contentLength = v.toIntOrNull() ?: 0
-                }
-            }
-            val body = if (contentLength > 0 && method == "POST") {
-                val buf = CharArray(contentLength)
-                var read = 0
-                while (read < contentLength) {
-                    val r = reader.read(buf, read, contentLength - read)
-                    if (r < 0) break
-                    read += r
-                }
-                String(buf, 0, read)
+            // 字节级读请求行 + 请求头（Content-Length 是字节数；字符级读取对多字节
+            // UTF-8 请求体不准，见 GatewayHttpReader）。
+            val head = try {
+                GatewayHttpReader.readHead(input)
+            } catch (e: java.io.IOException) {
+                writeError(out, 400, e.message ?: "bad request")
+                return
+            } ?: return
+            val body = if (head.contentLength > 0 && head.method == "POST") {
+                GatewayHttpReader.readBody(input, head.contentLength)
             } else ""
 
             when {
-                method == "GET" && path == "/v1/models" -> handleModels(repo, out)
-                method == "GET" && (path == "/" || path == "/v1" || path == "/health") -> handleHealth(out)
-                method == "POST" && path == "/v1/chat/completions" ->
-                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, headers, out) }
-                method == "POST" && path == "/v1/responses" ->
-                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, headers, out, responses = true) }
-                else -> writeError(out, 404, "not found: $method $path")
+                head.method == "GET" && head.path == "/v1/models" -> handleModels(repo, out)
+                head.method == "GET" && (head.path == "/" || head.path == "/v1" || head.path == "/health") -> handleHealth(out)
+                head.method == "POST" && head.path == "/v1/chat/completions" ->
+                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, head.headers, out) }
+                head.method == "POST" && head.path == "/v1/responses" ->
+                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, head.headers, out, responses = true) }
+                else -> writeError(out, 404, "not found: ${head.method} ${head.path}")
             }
         } catch (e: Exception) {
             Log.w(TAG, "handle failed: ${e.message}")

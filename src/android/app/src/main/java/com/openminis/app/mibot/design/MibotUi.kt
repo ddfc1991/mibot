@@ -219,6 +219,23 @@ fun MibotScaffold(
     bottomPadding: Dp = 24.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val screenName = com.openminis.app.diagnostics.BugJournal.screenLabel(title)
+    // Recorded once per entering the screen (LaunchedEffect keyed by the page
+    // name, not per recomposition): entering, then the first frame actually
+    // reaching the screen. A genuinely black page logs screen.entered but never
+    // completes withFrameNanos as a drawn frame — together with the
+    // navigation.request/accepted events that distinguishes "navigation
+    // happened but nothing drew" from other causes.
+    androidx.compose.runtime.LaunchedEffect(screenName) {
+        com.openminis.app.diagnostics.BugJournal.event("screen.entered", mapOf("screen" to screenName))
+        val startNanos = System.nanoTime()
+        runCatching { androidx.compose.runtime.withFrameNanos { } }
+        val ms = (System.nanoTime() - startNanos) / 1_000_000L
+        com.openminis.app.diagnostics.BugJournal.event("screen.shown", mapOf(
+            "screen" to screenName,
+            "phase" to ms.toString(),
+        ))
+    }
     Scaffold(
         containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onBackground,
