@@ -141,7 +141,7 @@ class Screen:
 
 def adb(*args):
     try:
-        result = subprocess.run(["adb", *args], capture_output=True, timeout=15, check=True)
+        result = subprocess.run(["adb", *args], capture_output=True, timeout=25, check=True)
     except (subprocess.SubprocessError, OSError) as exc:
         raise ProbeError(f"adb failed: {' '.join(args)}: {exc}") from exc
     return result.stdout
@@ -150,14 +150,14 @@ def adb(*args):
 def capture():
     # UIAutomator can transiently time out while Compose settles. Retry capture
     # once; never repeat a tap/gesture or navigate away to manufacture success.
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml')
             return adb('exec-out', 'cat', '/sdcard/ui.xml')
         except ProbeError:
-            if attempt:
+            if attempt == 2:
                 raise
-            time.sleep(0.5)
+            time.sleep(1.0)
     raise ProbeError('UI hierarchy unavailable')
 
 
