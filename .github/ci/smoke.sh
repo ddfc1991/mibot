@@ -213,6 +213,13 @@ for th in 1:light 2:dark; do
   m="${th%%:*}"; n="${th##*:}"
   zlaunch "$m" "$n" 14
   alive || abort "app not running (zh $n)"
+  # Dark first render is slower on API 31; give the entry a longer settle.
+  if [ "$m" = "2" ]; then
+    for _ in 1 2 3; do
+      probe check --text Mibot --desc 对话 --desc Conversations && break
+      sleep 4
+    done
+  fi
   # ci_vault_demo configures a demo provider: the original shell opens Chat,
   # while the initial English clean-install pass already verified onboarding.
   zshot "$n-00-entry" 1 --text Mibot --desc 对话 --desc Conversations
