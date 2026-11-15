@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.openminis.app.mikova.voice.floating.FloatingVoiceOverlay
 import com.openminis.app.mibot.design.*
 import com.openminis.app.ui.glass.FrostLevel
 import com.openminis.app.ui.glass.LocalGlassBottomInset
@@ -216,6 +217,22 @@ fun VoiceScreen(
             StatusChip(if (engine.id == VoiceEngineId.SHERPA) "本机离线引擎" else "系统语音服务", ChipKind.NEUTRAL)
             StatusChip(when { listening -> "正在聆听"; speaking -> "正在朗读"; speakBusy || decoding -> "处理中"; else -> "就绪" },
                 if (listening || speaking) ChipKind.ACCENT else ChipKind.NEUTRAL)
+        }
+        // 浮层语音入口 —— 参照 deepdeep 的悬浮对话窗
+        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
+            TextButton(
+                onClick = {
+                    val ctx = LocalContext.current
+                    if (!FloatingVoiceOverlay.canShow(ctx)) {
+                        status = "需先允许悬浮窗权限，才能显示浮层语音。"
+                        leave(onOpenSettings)
+                    } else {
+                        FloatingVoiceOverlay.show(ctx)
+                        status = "浮层语音已显示；回到桌面即可使用。"
+                    }
+                },
+                modifier = Modifier.semantics { contentDescription = "Mikova Floating Voice" },
+            ) { Text("浮层语音 · 桌面悬浮对话", color = MaterialTheme.colorScheme.primary) }
         }
         VoiceParticleField(
             listening = listening,
