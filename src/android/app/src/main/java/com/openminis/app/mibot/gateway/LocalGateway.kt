@@ -171,8 +171,10 @@ object LocalGateway {
             when {
                 method == "GET" && path == "/v1/models" -> handleModels(repo, out)
                 method == "GET" && (path == "/" || path == "/v1" || path == "/health") -> handleHealth(out)
-                method == "POST" && path == "/v1/chat/completions" -> handleChat(app, repo, body, headers, out)
-                method == "POST" && path == "/v1/responses" -> handleChat(app, repo, body, headers, out, responses = true)
+                method == "POST" && path == "/v1/chat/completions" ->
+                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, headers, out) }
+                method == "POST" && path == "/v1/responses" ->
+                    kotlinx.coroutines.runBlocking { handleChat(app, repo, body, headers, out, responses = true) }
                 else -> writeError(out, 404, "not found: $method $path")
             }
         } catch (e: Exception) {
@@ -265,13 +267,17 @@ object LocalGateway {
             if (base == null) { lastErr = "provider ${inst.label} has no base URL"; continue }
             val upstreamUrl = buildUpstreamUrl(base, inst, entry.baseModel.id, responses)
             val upstreamHeaders = buildUpstreamHeaders(inst, apiKey, headers)
+            // 组名路由时 body.model 是组名，上游不识别：替换成成员的真实 model id
+            val upstreamBody = if (modelId != entry.baseModel.id) {
+                runCatching { JSONObject(body).put("model", entry.baseModel.id).toString() }.getOrDefault(body)
+            } else body
 
             if (stream) {
                 // 流式：透传 SSE（单个成员，不回退——SSE 中途无法重放）
-                forwardStream(inst, upstreamUrl, upstreamHeaders, body, out)
+                forwardStream(inst, upstreamUrl, upstreamHeaders, upstreamBody, out)
                 return
             }
-            val outcome = GatewayNet.request(inst.id, upstreamUrl, "POST", upstreamHeaders, body)
+            val outcome = GatewayNet.request(inst.id, upstreamUrl, "POST", upstreamHeaders, upstreamBody)
             if (outcome.code != null && outcome.code in 200..299) {
                 writeRaw(out, 200, outcome.body, "application/json")
                 return

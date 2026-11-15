@@ -90,6 +90,7 @@ fun TaskQueueScreen(
     val filter = QueueFilter.valueOf(filterName)
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     var stopId by remember { mutableStateOf<String?>(null) }
+    var stopRunId by remember { mutableStateOf<String?>(null) }
     var showNewTask by rememberSaveable { mutableStateOf(false) }
     var newGoal by rememberSaveable { mutableStateOf("") }
     val jobList = jobs.values.sortedByDescending { it.createdAtMs }

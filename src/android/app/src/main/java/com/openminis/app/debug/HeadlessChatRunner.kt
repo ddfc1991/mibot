@@ -93,7 +93,11 @@ internal object HeadlessChatRunner {
         return provider
     }
 
-    private fun viewModel(
+    /**
+     * 取会话的 [ChatViewModel]（复用缓存 VM，与 UI 同实例）。
+     * 供浮层语音订阅流式回复（streamingById / isStreaming），实现字幕双工。
+     */
+    internal fun viewModel(
         context: Context,
         sessionId: String,
         kind: ChatViewModelStore.PoolKind = ChatViewModelStore.PoolKind.NORMAL,

@@ -11,7 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * [mikova/voice/floating] 浮层语音 —— 参照 deepdeep 的桌面悬浮语音对话窗。
@@ -87,7 +89,7 @@ object FloatingVoiceController {
     /** 输入框文字变化（UI 双向绑定）。 */
     fun setInput(text: String) { _input.value = text }
 
-    /** 发送一条用户消息，走真实聊天回路，回复后朗读。 */
+    /** 发送一条用户消息，走真实聊天回路，流式回复（字幕双工），完成后朗读。 */
     fun send() {
         val text = _input.value.trim()
         if (text.isEmpty() || _thinking.value) return
@@ -98,31 +100,65 @@ object FloatingVoiceController {
         val ctx = appContext ?: run { _thinking.value = false; return }
         scope.launch {
             val sid = sessionId ?: HeadlessChatRunner.ensureSession(ctx).also { sessionId = it }
-            val result = try {
+            // 1) 立即提交（不等待），让流式增量实时上屏
+            try {
                 HeadlessChatRunner.prompt(
-                    context = ctx,
-                    sessionId = sid,
-                    text = text,
-                    wait = true,
-                    timeoutMs = 120_000L,
+                    context = ctx, sessionId = sid, text = text, wait = false, timeoutMs = 120_000L,
                 )
             } catch (t: Throwable) {
-                _error.value = "请求失败：${t.message ?: t.javaClass.simpleName}"
-                null
-            } finally {
                 _thinking.value = false
+                _error.value = "请求失败：${t.message ?: t.javaClass.simpleName}"
+                return@launch
             }
-            if (result != null) {
-                val reply = result.responseText?.takeIf { it.isNotBlank() }
-                if (result.status == "Error" || reply == null) {
-                    _error.value = "请求失败，请稍后重试。${result.responseText?.takeIf { it != "no_provider_resolved_in_5s" } ?: ""}"
-                } else {
-                    _messages.value = _messages.value + Message("assistant", reply)
-                    speak(reply)
+            // 2) 订阅流式增量 → 实时更新最后一个 assistant 气泡（字幕）
+            val vm = runCatching { HeadlessChatRunner.viewModel(ctx, sid) }.getOrNull()
+            val deltaJob = if (vm != null) scope.launch {
+                vm.streamingById.collect { byId ->
+                    val delta = byId[sid] ?: return@collect
+                    val partial = delta.content
+                    if (partial.isNotBlank()) {
+                        // 更新或追加最后一条 assistant 气泡为实时字幕
+                        _messages.value = updateLastAssistant(partial)
+                    }
                 }
+            } else null
+            // 3) 等流结束，取最终文本朗读
+            var finalText: String? = null
+            val doneJob = if (vm != null) scope.launch {
+                // 等流开始再等结束（避免提交瞬间就读到 false）
+                withTimeoutOrNull(5000L) { vm.isStreaming.first { it } }
+                withTimeoutOrNull(120_000L) { vm.isStreaming.first { !it } }
+                finalText = latestAssistantText()
+            } else null
+            doneJob?.join()
+            deltaJob?.cancel()
+            _thinking.value = false
+            val reply = finalText ?: latestAssistantText()
+            if (reply.isNullOrBlank()) {
+                _error.value = "没有收到回复，请稍后重试"
+            } else {
+                _messages.value = updateLastAssistant(reply)
+                speak(reply)
             }
         }
     }
+
+    /** 用流式增量替换/追加最后一条 assistant 气泡。 */
+    private fun updateLastAssistant(partial: String): List<Message> {
+        val msgs = _messages.value
+        val last = msgs.lastOrNull()
+        return if (last != null && last.role == "assistant" && last.text != partial) {
+            msgs.dropLast(1) + last.copy(text = partial)
+        } else if (last != null && last.role == "assistant") {
+            msgs
+        } else {
+            msgs + Message("assistant", partial)
+        }
+    }
+
+    /** 从消息列表取最后一条 assistant 的完整文本。 */
+    private fun latestAssistantText(): String? =
+        _messages.value.lastOrNull { it.role == "assistant" }?.text?.takeIf { it.isNotBlank() }
 
     /** 识别回调：听写中 → 实时进输入框；终态 → 自动发送。 */
     private fun onRecognized(final: String, isFinal: Boolean) {
