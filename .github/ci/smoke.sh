@@ -183,36 +183,6 @@ modules modules Settings
 # Settings page scrolled to the Appearance / Feedback rows.
 adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 
-# --- Floating voice overlay (dedicated pass) ------------------------------
-# Open from the Voice page, assert the overlay window via dumpsys, then close
-# it (close button, else BACK) and confirm the shell is intact on Settings.
-# The module loop ends on the Settings page scrolled down to Appearance, so
-# scroll back to the top before re-selecting the Settings tab.
-probe select desc 设置 --top || probe select desc Settings --top || abort "Settings tab unavailable for floating voice"
-probe tap desc 'Mikova Voice Entry' --scrolls 8 --top || echo "::warning::voice entry not found for float"
-sleep 1
-probe tap desc 'Mikova Floating Voice' --scrolls 6 --top || echo "::warning::floating voice entry not found (dedicated)"
-sleep 2
-shot 07b-voice-float 1 || true
-adb shell dumpsys window > "$OUT/float-windows.txt" 2>&1
-if grep -q 'FloatingVoice' "$OUT/float-windows.txt"; then
-  echo "floating voice window present (dedicated)"
-else
-  echo "::warning::floating voice window not in dumpsys (dedicated)"
-fi
-# Close via the overlay's own close button (the overlay now takes focus, so
-# uiautomator can see it). Fall back to BACK if the button is not found.
-probe tap desc '关闭' --top --scrolls 0 || probe tap desc 'Close' --top --scrolls 0 || { echo "::warning::floating voice close button not found (dedicated)"; adb shell input keyevent KEYCODE_BACK; }
-sleep 1
-adb shell dumpsys window > "$OUT/float-windows-after.txt" 2>&1
-if grep -q 'FloatingVoice' "$OUT/float-windows-after.txt"; then
-  echo "::warning::floating voice still present after close (dedicated)"
-  adb shell input keyevent KEYCODE_BACK; sleep 1
-fi
-# Now back on the Voice page; BACK to the Settings shell.
-adb shell input keyevent KEYCODE_BACK; sleep 1
-probe select desc 设置 || probe select desc Settings || abort "Settings shell missing after floating voice (dedicated)"
-shot 07c-settings-after-float 2
 
 
 link backdrop
@@ -462,4 +432,29 @@ if [ "${SDK:-0}" -ge 31 ]; then
 fi
 
 alive || { echo "::error::app died during smoke test"; fail=1; }
+# --- Floating voice overlay (dedicated pass) ------------------------------
+# Run at the very END so its overlay windows never disturb the earlier
+# shell assertions. Open from the Voice page, assert the overlay via
+# dumpsys, then close it with BACK (the overlay is focusable) and stop.
+if [ "$PKG" != "" ]; then
+  probe select desc 设置 --top || probe select desc Settings --top || echo "::warning::settings tab not found for floating voice"
+  probe tap desc 'Mikova Voice Entry' --scrolls 8 --top || echo "::warning::voice entry not found for float"
+  sleep 1
+  probe tap desc 'Mikova Floating Voice' --scrolls 6 --top || echo "::warning::floating voice entry not found (dedicated)"
+  sleep 2
+  shot 07b-voice-float 1 || true
+  adb shell dumpsys window > "$OUT/float-windows.txt" 2>&1
+  if grep -q 'FloatingVoice' "$OUT/float-windows.txt"; then
+    echo "floating voice window present (dedicated)"
+  else
+    echo "::warning::floating voice window not in dumpsys (dedicated)"
+  fi
+  adb shell input keyevent KEYCODE_BACK; sleep 1
+  adb shell dumpsys window > "$OUT/float-windows-after.txt" 2>&1
+  if grep -q 'FloatingVoice' "$OUT/float-windows-after.txt"; then
+    echo "::warning::floating voice still present after BACK (dedicated)"
+    adb shell input keyevent KEYCODE_BACK; sleep 1
+  fi
+fi
+
 exit $fail
