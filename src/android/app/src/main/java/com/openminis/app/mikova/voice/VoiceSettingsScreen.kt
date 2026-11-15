@@ -300,8 +300,3 @@ private fun ProgressBar(percent: Int) {
         Spacer(Modifier.weight((1f - frac).coerceAtLeast(0.001f)))
     }
 }
-cent()),
-        )
-        Spacer(Modifier.weight((1f - frac).coerceAtLeast(0.001f)))
-    }
-}
