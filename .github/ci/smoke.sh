@@ -230,10 +230,11 @@ adb push "$NEW/feed.json" /data/local/tmp/feed.json >/dev/null 2>&1 || abort "ca
 adb shell run-as "$PKG" mkdir -p files/feed || abort "cannot mkdir feed dir"
 adb shell run-as "$PKG" cp /data/local/tmp/feed.json files/feed/feed.json || abort "cannot seed feed"
 adb shell rm -f /data/local/tmp/feed.json
-start "$NEW/start-feed.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true --es ci_lang en --ez ci_vault_demo true --ei ci_theme 1; sleep 14
+start "$NEW/start-feed.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true --ez ci_vault_demo true --ei ci_theme 1; sleep 14
 alive || abort "app not running (frost feed pass)"
-probe check --desc 对话 --desc Chats --save "$NEW/entry.xml" || abort "shell missing (frost feed pass)"
-tap desc Feed && shot "$NEW/feed-seeded" 2 --text '定时任务完成：每日备份' --text '新密钥已保存' || abort "seeded feed entries missing"
+probe check --desc 对话 --save "$NEW/entry.xml" || probe check --desc Chats --save "$NEW/entry.xml" || abort "shell missing (frost feed pass)"
+tap desc 动态 || tap desc Feed || abort "feed tab missing (frost feed pass)"
+shot "$NEW/feed-seeded" 2 --text '定时任务完成：每日备份' --text '新密钥已保存' || abort "seeded feed entries missing"
 # Pixel check (best effort): first-card area must be near-opaque frosted white
 # in light theme; ghost text would show as dark pixels. Warn, never fail.
 if python3 -c 'import PIL' >/dev/null 2>&1; then
@@ -259,7 +260,7 @@ PY
 fi
 # Floating island over a real virtual screen.
 adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow || abort "cannot grant overlay appop"
-probe select desc Settings --scrolls 4 || abort "settings tab missing (island pass)"
+probe select desc 设置 --scrolls 4 || probe select desc Settings --scrolls 4 || abort "settings tab missing (island pass)"
 settings_entry "Mikova Virtual Display Entry" || abort "vd entry missing (island pass)"
 shot "$NEW/vd-pool" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back || abort "vd pool missing"
 tap text '新建虚拟屏' || abort "create screen button missing"
@@ -277,7 +278,7 @@ fi
 tap text '收起浮窗' || true; sleep 2
 tap text '全部关闭' || true; sleep 3
 module_back
-probe check --desc Settings --save "$NEW/after-island.xml" || abort "shell missing after island pass"
+probe check --desc 设置 --save "$NEW/after-island.xml" || probe check --desc Settings --save "$NEW/after-island.xml" || abort "shell missing after island pass"
 # Core UI verification retains all tabs, modules, Back navigation and draft checks.
 # Network catalogs and obsolete helper diagnostics remain in the full workflow.
 if [ "${MIKOVA_CORE_UI_ONLY:-0}" = 1 ]; then
