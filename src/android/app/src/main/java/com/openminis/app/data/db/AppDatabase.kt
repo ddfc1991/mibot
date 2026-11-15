@@ -376,6 +376,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * [fork/archive] 会话归档：sessions 加 archived_at 列（毫秒，null=未归档）。
+         */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN archived_at INTEGER")
+            }
+        }
+
+        /**
+         * [fork/archive] Downgrade counterpart of [MIGRATION_14_15].
+         */
+        val MIGRATION_15_14 = object : Migration(15, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // ALTER TABLE DROP COLUMN requires SQLite 3.35+; Android API 30+
+                // ships it. The column holds only an archive timestamp — dropping
+                // it loses nothing but archive state, which is the intended
+                // downgrade semantics.
+                db.execSQL("ALTER TABLE sessions DROP COLUMN archived_at")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
