@@ -187,8 +187,7 @@ adb shell input swipe 540 1700 540 900 400; shot 07-settings-scrolled 2
 # Open from the Voice page, assert the overlay window via dumpsys, then close
 # it (close button, else BACK) and confirm the shell is intact on Settings.
 # The module loop ends on the Settings page scrolled down to Appearance, so
-# BACK once to be safe and re-select the Settings tab from the top.
-adb shell input keyevent KEYCODE_BACK; sleep 1
+# scroll back to the top before re-selecting the Settings tab.
 probe select desc 设置 --top || probe select desc Settings --top || abort "Settings tab unavailable for floating voice"
 probe tap desc 'Mikova Voice Entry' --scrolls 8 --top || echo "::warning::voice entry not found for float"
 sleep 1
