@@ -1,5 +1,8 @@
 package com.openminis.app.mikova.voice
 
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,7 +86,7 @@ fun VoiceSettingsScreen(
             ctx.startActivity(Intent(action))
         } catch (_: Exception) {
             try { ctx.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            catch (_: Exception) { deleteError = "无法打开系统$label设置" }
+            catch (_: Exception) { deleteError = "无法打开系统${label}设置" }
         }
     }
     LaunchedEffect(Unit) {

@@ -333,7 +333,7 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
         else -> VoiceEngine.VoiceError.UNKNOWN
     }
 
-    private companion object {
+    companion object {
         const val TAG = "PlatformVoice"
 
         /**
@@ -348,7 +348,9 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
                 return listOf("系统未安装任何语音识别服务")
             }
             val raw = runCatching {
-                Settings.Secure.getString(context.contentResolver, Settings.Secure.VOICE_RECOGNITION_SERVICE)
+                // VOICE_RECOGNITION_SERVICE is not a public Settings.Secure constant on
+                // all API levels; use the stable key string the platform ships.
+                Settings.Secure.getString(context.contentResolver, "voice_recognition_service")
             }.getOrNull()
             val state = VoiceDiagnostics.parseDefaultService(raw)
             VoiceDiagnostics.reason(state)?.let { return listOf(it) }
