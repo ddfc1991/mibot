@@ -209,6 +209,75 @@ for th in 1:light 2:dark; do
   probe select desc 设置 || abort "zh settings tab missing after new chat ($n)"
   probe check --desc 设置 || abort "zh shell missing after new chat ($n)"
 done
+# [fork/mikova-frost-island] Real-content verification for the two new
+# behaviors: (1) frosted feed cards over seeded entries (no background
+# bleed-through), (2) the per-display floating island (流云体) as a real
+# overlay window once a virtual screen exists. Overlay permission is granted
+# via appops (CI owns this emulator installation).
+NEW="$OUT/new"; mkdir -p "$NEW"
+adb shell am force-stop "$PKG"; sleep 1
+python3 - "$NEW/feed.json" <<'PY' 
+import json, sys, time
+now = int(time.time() * 1000)
+entries = [
+    {"id": "seed-1", "kind": "task_result", "title": "定时任务完成：每日备份", "body": "备份了 42 个文件，占用 1.2 MB，用时 3 秒。全部写入保险库。", "ts": now - 60_000, "liked": False, "sourceRef": "task:seed-1"},
+    {"id": "seed-2", "kind": "key_acquired", "title": "新密钥已保存", "body": "服务：example.com（仅显示服务名，密钥内容不落盘）", "ts": now - 3_600_000, "liked": False, "sourceRef": "vault:example.com"},
+    {"id": "seed-3", "kind": "plugin_event", "title": "插件已启动：dsh-market", "body": "Node 22 就绪，导入 3 个技能。", "ts": now - 7_200_000, "liked": True, "sourceRef": "plugin:dsh-market"},
+]
+json.dump({"version": 1, "entries": entries}, ensure_ascii=False, fp=open(sys.argv[1], "w"))
+PY
+adb push "$NEW/feed.json" /data/local/tmp/feed.json >/dev/null 2>&1 || abort "cannot push feed seed"
+adb shell run-as "$PKG" mkdir -p files/feed || abort "cannot mkdir feed dir"
+adb shell run-as "$PKG" cp /data/local/tmp/feed.json files/feed/feed.json || abort "cannot seed feed"
+adb shell rm -f /data/local/tmp/feed.json
+start "$NEW/start-feed.txt" -n "$PKG/com.openminis.app.MainActivity" --ez glass_demo true --es ci_lang en --ez ci_vault_demo true --ei ci_theme 1; sleep 14
+alive || abort "app not running (frost feed pass)"
+probe check --desc 对话 --desc Chats --save "$NEW/entry.xml" || abort "shell missing (frost feed pass)"
+tap desc Feed && shot "$NEW/feed-seeded" 2 --text '定时任务完成：每日备份' --text '新密钥已保存' || abort "seeded feed entries missing"
+# Pixel check (best effort): first-card area must be near-opaque frosted white
+# in light theme; ghost text would show as dark pixels. Warn, never fail.
+if python3 -c 'import PIL' >/dev/null 2>&1; then
+  python3 - "$NEW/feed-seeded.png" <<'PY' || true
+import sys
+from PIL import Image
+img = Image.open(sys.argv[1]).convert("RGB")
+w, h = img.size
+samples = []
+for y in range(int(h * 0.28), int(h * 0.55), 12):
+    for x in range(int(w * 0.08), int(w * 0.92), 12):
+        r, g, b = img.getpixel((x, y))
+        if r > 180 and g > 180 and b > 180:
+            samples.append((r, g, b))
+if samples:
+    n = len(samples)
+    avg = tuple(sum(c[i] for c in samples) // n for i in range(3))
+    dark = sum(1 for c in samples if sum(c) < 640) / n
+    open(sys.argv[1] + ".op.txt", "w").write(f"avg={avg} dark_ratio={dark:.3f} samples={n}\n")
+    if avg[0] < 232 or avg[1] < 232 or avg[2] < 232 or dark > 0.05:
+        print("::warning::feed card area not near-opaque; possible bleed-through")
+PY
+fi
+# Floating island over a real virtual screen.
+adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow || abort "cannot grant overlay appop"
+probe select desc Settings --scrolls 4 || abort "settings tab missing (island pass)"
+settings_entry "Mikova Virtual Display Entry" || abort "vd entry missing (island pass)"
+shot "$NEW/vd-pool" 1 --text '虚拟屏多开' --text '新建虚拟屏' --desc Back || abort "vd pool missing"
+tap text '新建虚拟屏' || abort "create screen button missing"
+sleep 12
+shot "$NEW/vd-screen-created" 1 --text '屏幕池(1)' --text '流云体' --desc Back || abort "screen did not appear"
+tap text '流云体' || abort "island toggle missing"
+sleep 4
+shot "$NEW/vd-island" 1 --desc 'display 预览' --text '收起浮窗' --desc Back || abort "island did not open"
+adb shell dumpsys window windows > "$NEW/windows.txt" 2>&1 || true
+if grep -q 'MikovaIsland' "$NEW/windows.txt"; then
+  grep 'MikovaIsland' "$NEW/windows.txt" | head -3 | tee "$NEW/island-window.txt"
+else
+  echo "NO island overlay window" | tee "$NEW/island-window.txt"; abort "island overlay window absent in dumpsys"
+fi
+tap text '收起浮窗' || true; sleep 2
+tap text '全部关闭' || true; sleep 3
+module_back
+probe check --desc Settings --save "$NEW/after-island.xml" || abort "shell missing after island pass"
 # Core UI verification retains all tabs, modules, Back navigation and draft checks.
 # Network catalogs and obsolete helper diagnostics remain in the full workflow.
 if [ "${MIKOVA_CORE_UI_ONLY:-0}" = 1 ]; then

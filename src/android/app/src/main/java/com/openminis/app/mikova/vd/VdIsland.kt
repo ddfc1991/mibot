@@ -140,7 +140,10 @@ internal class VdIsland(
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT,
-            ).apply { gravity = Gravity.TOP or Gravity.START }
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                title = "MikovaIsland-$displayId"
+            }
             root = frame
             preview = image
             label = status
