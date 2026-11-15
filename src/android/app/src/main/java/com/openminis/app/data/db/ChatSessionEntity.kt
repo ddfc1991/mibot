@@ -69,6 +69,10 @@ data class ChatSessionEntity(
      */
     @ColumnInfo(name = "folder_id") val folderId: String? = null,
     /**
+     * [fork/archive] 会话归档时间（毫秒）。null=未归档，非 null=已归档。
+     * 已归档会话不出现在主列表，数据保留，可在归档列表查看/恢复/删除。
+     */
+    @ColumnInfo(name = "archived_at") val archivedAt: Long? = null,    /**
      * [T-p1-delegate-task] Child-session ownership (design v4 §3.1). Non-null
      * ⇒ this is a hidden child of that session: it never appears in the home
      * list and is reached only through the parent's helper capsule / tool
@@ -83,4 +87,6 @@ data class ChatSessionEntity(
     @ColumnInfo(name = "parent_tool_use_id") val parentToolUseId: String? = null,
 ) {
     val isChild: Boolean get() = parentSessionId != null
+    /** [fork/archive] 已归档（非 null archivedAt）。 */
+    val isArchived: Boolean get() = archivedAt != null
 }

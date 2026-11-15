@@ -3,6 +3,7 @@ package com.openminis.app.ui.glass
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,6 +70,8 @@ fun GlassSidebar(
     haze: HazeState,
     onOpen: (RecentItem) -> Unit,
     onNewChat: () -> Unit,
+    onOpenArchived: () -> Unit = {},
+    onArchive: (RecentItem) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val style = LocalGlassStyle.current
@@ -123,10 +127,48 @@ fun GlassSidebar(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(shown, key = { it.id }) { item ->
-                    RecentRow(item, fg, fgMuted, dark) { onOpen(item) }
+                    RecentRow(item, fg, fgMuted, dark, onOpen = { onOpen(item) }, onLongPress = { onArchive(item) })
                 }
             }
+            // [fork/archive] 底部归档入口：收进归档的会话不占主列表，可在此查看。
+            Spacer(Modifier.height(8.dp))
+            ArchivedEntry(fg, fgMuted, dark, onClick = onOpenArchived)
         }
+    }
+}
+
+/** [fork/archive] 侧边栏底部的「归档」入口。 */
+@Composable
+private fun ArchivedEntry(fg: Color, fgMuted: Color, dark: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Inventory2,
+            contentDescription = null,
+            tint = fgMuted,
+            modifier = Modifier.size(com.openminis.app.mibot.design.MibotIcon.Dense),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            com.openminis.app.mibot.design.t("归档", "Archive"),
+            color = fg,
+            fontSize = com.openminis.app.mibot.design.MibotType.Body,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            com.openminis.app.mibot.design.t("长按会话可归档", "Long-press a chat to archive"),
+            color = fgMuted,
+            fontSize = 11.sp,
+            maxLines = 1,
+        )
     }
 }
 
@@ -164,12 +206,12 @@ private fun SearchField(
 }
 
 @Composable
-private fun RecentRow(item: RecentItem, fg: Color, fgMuted: Color, dark: Boolean, onClick: () -> Unit) {
+private fun RecentRow(item: RecentItem, fg: Color, fgMuted: Color, dark: Boolean, onOpen: () -> Unit, onLongPress: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

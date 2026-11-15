@@ -158,6 +158,29 @@ class ChatRepository(internal val dao: ChatDao) {
         dao.deleteSession(id)
     }
 
+    // ─── Session archive (fork/archive) ───────────────────────────────────
+    // Archived sessions leave the home list but keep their data. Backup and
+    // storage still see them (DAO is unfiltered); only the UI list filters.
+
+    /** 归档一个会话（含其子会话）。返回是否成功。 */
+    suspend fun archiveSession(id: String): Boolean {
+        val now = System.currentTimeMillis()
+        val any = sessionSubtreeIds(id)
+        if (any.isEmpty()) return false
+        for (sid in any) dao.setSessionArchivedAt(sid, now)
+        return true
+    }
+
+    /** 恢复一个会话（含其子会话）。 */
+    suspend fun unarchiveSession(id: String) {
+        for (sid in sessionSubtreeIds(id)) dao.setSessionArchivedAt(sid, null)
+    }
+
+    /** 已归档的会话（仅根会话，按归档时间倒序）。 */
+    suspend fun listArchivedSessions(): List<ChatSessionEntity> =
+        dao.listSessions().filter { it.isArchived && !it.isChild }
+            .sortedByDescending { it.archivedAt ?: 0L }
+
     // ─── Session groups ("folders") ────────────────────────────────────────
     // [T-android-session-grouping] Ported from iOS ChatStore's Folders section.
     // Code says Folder, UI says Group — see FolderEntity for why.

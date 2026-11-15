@@ -121,6 +121,10 @@ interface ChatDao {
     @Query("UPDATE sessions SET title = :title, updated_at = :updatedAt WHERE id = :id")
     suspend fun updateSessionTitle(id: String, title: String, updatedAt: Long)
 
+    /** [fork/archive] 设置会话归档时间（null=恢复，非 null=归档）。 */
+    @Query("UPDATE sessions SET archived_at = :archivedAt WHERE id = :id")
+    suspend fun setSessionArchivedAt(id: String, archivedAt: Long?)
+
     @Query("UPDATE sessions SET title = :title, category = COALESCE(:category, category), updated_at = :updatedAt WHERE id = :id")
     suspend fun updateSessionTitleAndCategory(id: String, title: String, category: String?, updatedAt: Long)
 

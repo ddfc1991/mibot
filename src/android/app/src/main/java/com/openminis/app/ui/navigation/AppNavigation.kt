@@ -94,6 +94,7 @@ private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
 object Routes {
     const val SESSION_LIST = "sessions"
     const val CHAT = "chat/{sessionId}"
+    const val ARCHIVED = "archived"
     const val SETTINGS = "settings"
     const val PROVIDER_LIST = "providers"
     const val ADD_PROVIDER = "add_provider"
@@ -668,6 +669,19 @@ fun AppNavigation(
         // share handoff, Move-to, the widget, notifications — and every one of
         // them keeps working unchanged. On a phone the scaffold resolves to a
         // single pane, so those pushes look and behave exactly as before.
+        // [fork/archive] 归档会话列表页。
+        composable(Routes.ARCHIVED) {
+            com.openminis.app.ui.sessions.ArchivedSessionsScreen(
+                chatRepository = chatRepository,
+                onBack = { navController.popBackStack() },
+                onOpenSession = { sid ->
+                    navController.navigate(Routes.chat(sid)) {
+                        popUpTo(Routes.ARCHIVED) { inclusive = false }
+                    }
+                },
+            )
+        }
+
         composable(Routes.SESSION_LIST) {
             ChatSplitScaffoldRoute(
                 initialSessionId = null,

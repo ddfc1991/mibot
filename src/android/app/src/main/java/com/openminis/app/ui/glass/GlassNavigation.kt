@@ -180,6 +180,19 @@ fun GlassDrawerHost(
                         popUpTo(Routes.SESSION_LIST) { inclusive = false }
                     }
                 },
+                onOpenArchived = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(Routes.ARCHIVED) { launchSingleTop = true }
+                },
+                onArchive = { item ->
+                    // 长按会话行 → 归档（仅 Chat 类型；Group 无单会话 id）
+                    if (item is RecentItem.Chat && !item.id.startsWith("demo-")) {
+                        scope.launch {
+                            chatRepository.archiveSession(item.id)
+                            drawerState.close()
+                        }
+                    }
+                },
             )
           }
         },

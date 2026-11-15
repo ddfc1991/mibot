@@ -48,9 +48,12 @@ object FloatingVoiceOverlay {
         val dlg = ComponentDialog(context, android.R.style.Theme_Translucent_NoTitleBar)
         val window = dlg.window ?: return false
         window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        // NOT_TOUCH_MODAL lets touches outside the overlay pass through, while
+        // NOT_FOCUSABLE is intentionally NOT set so the overlay can take focus:
+        // the uiautomator smoke probe can then see it (and its close button),
+        // and BACK dismisses the overlay first instead of popping the shell.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
         )
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
@@ -80,6 +83,9 @@ object FloatingVoiceOverlay {
         }
         makeRounded(compose, context)
         dlg.setContentView(compose)
+        // BACK dismisses the overlay first (it now takes focus). Also allow
+        // cancel-on-back even though NOT_TOUCH_MODAL keeps outside touches live.
+        dlg.setCancelable(true)
         dlg.setOnDismissListener { visible = false; FloatingVoiceController.onOverlayClosed() }
         dlg.show()
         dialog = dlg
