@@ -3,15 +3,13 @@ package com.openminis.app.mikova.voice.floating
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
-import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.ComponentDialog
 import androidx.compose.ui.platform.ComposeView
 
 /**
@@ -25,7 +23,7 @@ object FloatingVoiceOverlay {
 
     private const val TAG = "FloatingVoice"
 
-    private var dialog: android.app.Dialog? = null
+    private var dialog: ComponentDialog? = null
     private var collapsed = false
     private var viewWidth = 0
     private var viewHeight = 0
@@ -47,7 +45,7 @@ object FloatingVoiceOverlay {
         if (dialog?.isShowing == true) { collapsed = false; refresh(); return true }
         if (!canShow(context)) return false
         FloatingVoiceController.ensureInit(context)
-        val dlg = android.app.Dialog(context, android.R.style.Theme_Translucent_NoTitleBar)
+        val dlg = ComponentDialog(context, android.R.style.Theme_Translucent_NoTitleBar)
         val window = dlg.window ?: return false
         window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         window.addFlags(
