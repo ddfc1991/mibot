@@ -111,12 +111,14 @@ fun VoiceScreen(
             if (decoding) { cancelInput(); status = "识别等待超时，已保留原文字，可再次聆听。" }
         }
     }
+    // 权限回调先于 toggleListening 定义执行,经引用变量延迟绑定。
+    var toggleRef: (() -> Unit)? = null
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             status = "麦克风权限已开启，点按声场开始聆听。"
             // Auto-reenter so a single tap starts listening once permission lands
             // (covers pre-granted installs where the callback fires immediately).
-            handler.post { if (alive && !listening) toggleListening() }
+            handler.post { if (alive && !listening) toggleRef?.invoke() }
         } else {
             status = "麦克风权限未开启，原文字已保留；可到设置开启后重试。"
         }
@@ -178,6 +180,7 @@ fun VoiceScreen(
         try { engine.startListen(VoiceEngine.LocaleCompat("zh-CN"), listener) }
         catch (_: Exception) { cancelInput(); status = "无法打开麦克风，检查权限和系统语音服务后重试。" }
     }
+    toggleRef = ::toggleListening
     fun speak(text: String, voiceId: String?, preview: Boolean = false) {
         stopOutput(); cancelInput()
         if (text.isBlank()) return
