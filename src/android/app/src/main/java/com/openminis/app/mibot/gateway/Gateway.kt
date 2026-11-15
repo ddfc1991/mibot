@@ -538,10 +538,11 @@ fun GatewayScreen(onBack: () -> Unit, onProvider: (String) -> Unit, onModelGroup
                 },
             )
             Row(Modifier.fillMaxWidth().padding(start = 70.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val copiedText = t("已复制", "Copied")
                 SmallAction(t("复制地址", "Copy URL")) {
                     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("mibot-gateway", "http://${LocalGateway.boundHost}:${LocalGateway.currentPort}/v1"))
-                    android.widget.Toast.makeText(ctx, t("已复制", "Copied"), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(ctx, copiedText, android.widget.Toast.LENGTH_SHORT).show()
                 }
                 if (gwRunning) {
                     SmallAction(t("停止", "Stop")) {
