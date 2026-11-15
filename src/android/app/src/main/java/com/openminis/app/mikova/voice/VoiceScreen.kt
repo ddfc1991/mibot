@@ -112,7 +112,14 @@ fun VoiceScreen(
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        status = if (granted) "麦克风权限已开启，点按声场开始聆听。" else "麦克风权限未开启，原文字已保留；可到设置开启后重试。"
+        if (granted) {
+            status = "麦克风权限已开启，点按声场开始聆听。"
+            // Auto-reenter so a single tap starts listening once permission lands
+            // (covers pre-granted installs where the callback fires immediately).
+            handler.post { if (alive && !listening) toggleListening() }
+        } else {
+            status = "麦克风权限未开启，原文字已保留；可到设置开启后重试。"
+        }
     }
     // 系统识别服务的具体不可用原因(空 = 可用);sherpa 降级时同样反映系统识别实况。
     val recognitionIssue = remember(context) {

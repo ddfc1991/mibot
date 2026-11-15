@@ -136,7 +136,8 @@ modules() {
       voice)
         # -g does not pre-grant RECORD_AUDIO on every API level: grant it
         # explicitly so the listen interaction really starts.
-        adb shell pm grant "$PKG" android.permission.RECORD_AUDIO >/dev/null 2>&1 || echo "::warning::cannot grant record audio"
+        adb shell pm grant "$PKG" android.permission.RECORD_AUDIO > "$OUT/grant-voice.txt" 2>&1 && echo "granted RECORD_AUDIO" || { echo "::warning::cannot grant record audio"; cat "$OUT/grant-voice.txt"; }
+        sleep 1
         shot "$prefix/$file" 1 --text 语音 --desc 'Mikova Voice Settings' --desc Back
         # Real listen interaction: permission is pre-granted by -g; the emulator may
         # or may not have a default recognition service. Tap the field, wait, screenshot
