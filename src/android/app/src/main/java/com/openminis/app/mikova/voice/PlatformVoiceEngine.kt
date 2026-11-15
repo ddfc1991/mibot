@@ -141,7 +141,17 @@ class PlatformVoiceEngine(private val appContext: Context) : VoiceEngine {
                     override fun onRmsChanged(rmsdB: Float) = emit { listener.onLevel(VoiceLevels.systemRmsToDb(rmsdB)) }
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
                     override fun onEndOfSpeech() = Unit
-                    override fun onError(error: Int) = finish { listener.onError(mapError(error)) }
+                    override fun onError(error: Int) = finish {
+                        val code = mapError(error)
+                        val reason = if (error == SpeechRecognizer.ERROR_CLIENT) {
+                            // ERROR_CLIENT is what a device with no configured default
+                            // recognition service fires; surface the exact fix instead
+                            // of a generic failure.
+                            currentBlockers().firstOrNull()
+                                ?: "系统语音识别服务启动失败，请到系统语音输入设置重新选择"
+                        } else null
+                        listener.onError(code, reason)
+                    }
                     override fun onResults(results: Bundle?) = finish {
                         val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                         if (text.isBlank()) listener.onError(VoiceEngine.VoiceError.NO_MATCH) else listener.onFinal(text)
