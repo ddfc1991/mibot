@@ -42,7 +42,7 @@ class UiProbeTest(unittest.TestCase):
         with patch('ui_probe.adb', side_effect=ProbeError('timeout')) as command, patch('ui_probe.time.sleep'):
             with self.assertRaises(ProbeError):
                 capture()
-            self.assertEqual(command.call_count, 2)
+            self.assertEqual(command.call_count, 3)
 
     def test_invalid_targets_never_tap(self):
         for attrs in ['enabled="false" bounds="[0,0][100,100]"',
