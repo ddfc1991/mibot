@@ -539,11 +539,11 @@ object GatewayDemo {
         val app = ctx.applicationContext as? MinisApp ?: return
         val repo = app.providerRepositoryOrNull ?: return
         runCatching {
-            // Once per install: the vault seed runs on every CI launch, and the
-            // provider config may still be loading, so an emptiness check
-            // alone seeded duplicates.
+            // Re-seed whenever the demo providers are actually absent (not on a
+            // one-shot flag): a CI relaunch may restart before the provider
+            // table persisted, and a stale "seeded" flag then left the dark
+            // theme launch on onboarding with no provider at all.
             val prefs = ctx.getSharedPreferences("mibot_gateway_demo", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("seeded", false)) return
             repo.ensureConfigLoaded()
             if (repo.config.value.instances.any { it.label == "OpenRouter" || it.label == "硅基流动" }) {
                 prefs.edit().putBoolean("seeded", true).commit(); return
