@@ -138,17 +138,20 @@ fun GlassDrawerHost(
     val haze = rememberHazeState()
     val sessions by remember(chatRepository) { chatRepository.observeSessions() }
         .collectAsState(initial = emptyList())
+    // [fork/archive] The sidebar's Recent list hides archived and child
+    // sessions (the SessionListViewModel does the same for the main list).
+    val visibleSessions = remember(sessions) { sessions.filter { !it.isArchived && !it.isChild } }
     // [fork/mibot-groups] Bot group chats ride the same mixed Recent list.
     val context = LocalContext.current
     val groupStore = remember(context) { com.openminis.app.mibot.groups.GroupChats.store(context) }
     val groups by groupStore.groups.collectAsState()
-    val items = remember(sessions, groups) {
+    val items = remember(visibleSessions, groups) {
         if (GlassDemo.enabled) GlassDemo.items() else {
             val names = com.openminis.app.mibot.groups.GroupChats.roster(context).associate { it.id to it.displayName(context) }
             val groupRows = groups.map { g ->
                 RecentItem.Group(g.id, g.title, g.updatedAt, g.memberBotIds.mapNotNull { names[it] })
             }
-            RecentItems.merge(RecentItems.fromSessions(sessions), groupRows, "")
+            RecentItems.merge(RecentItems.fromSessions(visibleSessions), groupRows, "")
         }
     }
     ModalNavigationDrawer(
