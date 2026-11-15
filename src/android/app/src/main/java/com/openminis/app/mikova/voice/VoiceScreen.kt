@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -302,6 +303,7 @@ fun VoiceScreen(
             "当前使用本机语音模型。点按麦克风可打断朗读；这不是持续监听的免触控全双工通话。"
         else "当前使用系统语音服务，是否联网取决于识别服务和所选音色；不能保证离线。点按可打断朗读。")
         Spacer(Modifier.height(bottom))
+        Spacer(Modifier.navigationBarsPadding())
     }
     if (showVoices) {
         AlertDialog(
