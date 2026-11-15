@@ -70,6 +70,7 @@ object FloatingVoiceOverlay {
         )
         val lp = window.attributes
         lp.y = (dm.density * 48).toInt()
+        lp.title = "FloatingVoice"
         window.attributes = lp
 
         val compose = ComposeView(context)

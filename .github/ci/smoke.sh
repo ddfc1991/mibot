@@ -166,7 +166,15 @@ modules() {
         shot "$prefix/voice-settings" 1 --text 语音设置 --text '系统识别(兜底)' --desc 'Mikova System Voice Settings' --desc 'Mikova System TTS Settings' --desc Back
         module_back
         probe seek desc 'Mikova Voice Transcript' --scrolls 6 || abort 'voice transcript missing after Back'
-        shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42 ;;
+        shot "$prefix/voice-return" 1 --desc 'Mikova Voice Transcript' --draft 'Mikova Voice Transcript' MikovaDraft42
+        # Floating voice overlay: grant overlay permission, open from Voice page,
+        # assert the overlay window really appears via dumpsys.
+        adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 || echo "::warning::cannot grant overlay appop"
+        probe tap desc 'Mikova Floating Voice' --scrolls 2 || echo "::warning::floating voice entry not found"
+        sleep 2
+        shot "$prefix/voice-float" 1 || true
+        adb shell dumpsys window > "$OUT/float-windows.txt" 2>&1
+        grep -q 'FloatingVoice' "$OUT/float-windows.txt" && echo "floating voice window present" || echo "::warning::floating voice window not in dumpsys" ;;
     esac
     module_back
     alive || abort "app died returning from $file"
