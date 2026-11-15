@@ -142,7 +142,7 @@ internal class VdIsland(
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                title = "MikovaIsland-$displayId"
+                this.title = "MikovaIsland-${screen.displayId}"
             }
             root = frame
             preview = image
